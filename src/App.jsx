@@ -114,18 +114,72 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────────
 // SCREEN: LANDING
 // ─────────────────────────────────────────────────────────────────
-function LandingScreen({ onCreateEvent, onOrgLogin, onJudgeReg, onJudgeLogin }) {
+function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeReg, onJudgeLogin }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", background: "#080808" }}>
       <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 64, letterSpacing: 6, lineHeight: 1 }}>DAN<span style={{ color: "#ff4d4d" }}>BUZZ</span></div>
       <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#444", letterSpacing: 4, marginBottom: 52 }}>BATTLE MANAGEMENT SYSTEM</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 320 }}>
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", fontSize: 14, padding: "15px" }} onClick={onCreateEvent}>+ CREATE NEW EVENT</button>
         <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", fontSize: 14, padding: "15px" }} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
         <button className="btn" style={{ background: "#111", color: "#aaa", border: "1px solid #222", fontSize: 13, padding: "14px" }} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
         <button className="btn" style={{ background: "transparent", color: "#555", border: "none", fontSize: 12, padding: "10px" }} onClick={onJudgeReg}>FIRST TIME? JUDGE REGISTRATION</button>
       </div>
       <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#1e1e1e", letterSpacing: 2, marginTop: 52 }}>CUSTOM CATEGORIES · REAL-TIME · POWERED BY SUPABASE</div>
+      {/* Hidden admin entry — subtle, not visible at a glance */}
+      <button
+        style={{ position: "fixed", bottom: 12, right: 16, background: "none", border: "none", cursor: "pointer", color: "#1e1e1e", fontFamily: "Barlow,sans-serif", fontSize: 9, letterSpacing: 1, padding: 4 }}
+        onClick={onAdminLogin}
+      >
+        admin
+      </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SCREEN: ADMIN LOGIN (DanBuzz internal only)
+// ─────────────────────────────────────────────────────────────────
+const ADMIN_PASSWORD = "DANBUZZ2025"; // Change this to your preferred admin password
+
+function AdminLoginScreen({ onBack, onSuccess, showToast }) {
+  const [pass, setPass]     = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = () => {
+    if (!pass.trim()) return showToast("Enter admin password!", "error");
+    setLoading(true);
+    setTimeout(() => {
+      if (pass.trim() === ADMIN_PASSWORD) {
+        onSuccess();
+      } else {
+        showToast("Incorrect password.", "error");
+      }
+      setLoading(false);
+    }, 400);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>DANBUZZ ADMIN</div>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Restricted access. Enter your admin password to create a new event.</div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>ADMIN PASSWORD</div>
+          <input
+            className="inp"
+            type="password"
+            placeholder="••••••••"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            autoFocus
+          />
+        </div>
+        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={submit} disabled={loading}>
+          {loading ? <Spinner /> : "ACCESS →"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1491,7 +1545,8 @@ export default function App() {
     <div style={{ fontFamily: "'Bebas Neue',sans-serif", background: "#080808", minHeight: "100vh", color: "#fff" }}>
       <style>{CSS}</style>
       <Toast toast={toast} />
-      {screen === "landing"     && <LandingScreen onCreateEvent={() => setScreen("create")} onOrgLogin={() => setScreen("orgLogin")} onJudgeReg={() => setScreen("judgeReg")} onJudgeLogin={() => setScreen("judgeLogin")} />}
+      {screen === "landing"     && <LandingScreen onAdminLogin={() => setScreen("adminLogin")} onOrgLogin={() => setScreen("orgLogin")} onJudgeReg={() => setScreen("judgeReg")} onJudgeLogin={() => setScreen("judgeLogin")} />}
+      {screen === "adminLogin"  && <AdminLoginScreen onBack={() => setScreen("landing")} onSuccess={() => setScreen("create")} showToast={showToast} />}
       {screen === "orgLogin"    && <OrgLoginScreen onBack={() => setScreen("landing")} onLogin={handleOrgLogin} showToast={showToast} />}
       {screen === "picker"      && <EventPickerScreen onBack={() => setScreen("landing")} onSelect={(ev) => { setActiveEvent(ev); setScreen("dashboard"); }} showToast={showToast} />}
       {screen === "create"      && <CreateEventScreen onBack={() => setScreen("landing")} onCreate={(ev) => { setActiveEvent(ev); setScreen("created"); }} showToast={showToast} />}
