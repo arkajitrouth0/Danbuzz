@@ -224,18 +224,30 @@ function AdminDashboard({ onBack, showToast }) {
             {loading ? <div style={{ textAlign: "center", padding: 48 }}><Spinner /></div> : events.length === 0 ? (
               <div style={{ textAlign: "center", padding: "48px", fontFamily: "Barlow,sans-serif", color: "#333" }}>No events yet — create one using the tab above.</div>
             ) : events.map((ev) => {
-              const cats = ev.categories || [];
+              const cats       = ev.categories || [];
+              const jCounts    = ev.judge_counts || {};
+              const totalJudges = cats.reduce((sum, cat) => sum + (parseInt(jCounts[cat]) || 3), 0);
               return (
                 <div key={ev.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: "16px 20px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
                   <div>
                     <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 2 }}>{ev.name}</div>
-                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{ev.city} · {ev.date}</div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>
+                      {ev.city} · {ev.date}{ev.organizer_name ? ` · ${ev.organizer_name}` : ""}
+                    </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                       {cats.slice(0, 5).map((cat, i) => {
-                        const c = PALETTE[i % PALETTE.length];
-                        return <span key={cat} style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, padding: "2px 8px", borderRadius: 10, background: c.bg, border: `1px solid ${c.border}`, color: c.primary }}>{cat}</span>;
+                        const c     = PALETTE[i % PALETTE.length];
+                        const count = parseInt(jCounts[cat]) || 3;
+                        return (
+                          <span key={cat} style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, padding: "2px 8px", borderRadius: 10, background: c.bg, border: `1px solid ${c.border}`, color: c.primary }}>
+                            {cat} · {count}J
+                          </span>
+                        );
                       })}
                       {cats.length > 5 && <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#444" }}>+{cats.length - 5} more</span>}
+                    </div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#444", marginTop: 5, letterSpacing: 1 }}>
+                      {cats.length} CATEGORIES · {totalJudges} JUDGE SLOTS TOTAL
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -300,7 +312,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
 
     const { data: eventData, error: eventError } = await supabase
       .from("events")
-      .insert({ name: form.name.trim(), city: form.city.trim(), date: form.date, org_code: orgCode, categories, organizer_name: form.organizer.trim() || null })
+      .insert({ name: form.name.trim(), city: form.city.trim(), date: form.date, org_code: orgCode, categories, organizer_name: form.organizer.trim() || null, judge_counts: judgeCounts })
       .select().single();
     if (eventError) { showToast("Failed to create event: " + eventError.message, "error"); setLoading(false); return; }
 
@@ -338,11 +350,14 @@ function AdminCreateEvent({ showToast, onCreated }) {
         <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 3, marginBottom: 14 }}>JUDGE CODES — Share each one with the respective judge</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12, marginBottom: 24 }}>
           {(createdEvent.categories || []).map((cat, catIdx) => {
-            const c = PALETTE[catIdx % PALETTE.length];
+            const c        = PALETTE[catIdx % PALETTE.length];
             const catCodes = codes.filter((j) => j.category === cat);
             return (
               <div key={cat} style={{ background: "#0f0f0f", border: `1px solid ${c.border}`, borderRadius: 10, padding: 16 }}>
-                <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 2, color: c.primary, marginBottom: 10 }}>{cat}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 2, color: c.primary }}>{cat}</div>
+                  <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: c.primary, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 20, padding: "2px 8px" }}>{catCodes.length} JUDGES</span>
+                </div>
                 {catCodes.map((j) => (
                   <div key={j.code} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7, padding: "7px 10px", background: "#151515", borderRadius: 7 }}>
                     <div>
