@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabase";
 
 // ─────────────────────────────────────────────────────────────────
@@ -665,12 +665,15 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   },[event.id,myCategory]);
 
   // Derived
-  const scoreMap = {};
-  scores.forEach(s=>{ if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score; });
-  const getScore   = (pid)=>calcAvgScore(Object.values(scoreMap[pid]||{}));
-  const getMyScore = (pid)=>scoreMap[pid]?.[myKey];
-  const checkedIn  = participants.filter(p=>p.checked_in);
-  const prelimRanked = [...checkedIn].sort((a,b)=>getScore(b.id)-getScore(a.id));
+  const scoreMap = useMemo(()=>{
+    const m = {};
+    scores.forEach(s=>{ if(!m[s.participant_id])m[s.participant_id]={};m[s.participant_id][s.judge_key]=s.score; });
+    return m;
+  },[scores]);
+  const getScore   = useCallback((pid)=>calcAvgScore(Object.values(scoreMap[pid]||{})),[scoreMap]);
+  const getMyScore = useCallback((pid)=>scoreMap[pid]?.[myKey],[scoreMap,myKey]);
+  const checkedIn  = useMemo(()=>participants.filter(p=>p.checked_in),[participants]);
+  const prelimRanked = useMemo(()=>[...checkedIn].sort((a,b)=>getScore(b.id)-getScore(a.id)),[checkedIn,getScore]);
 
   // Build current round's battles from prelim ranking (Top vs Bottom seeding)
   const currentBattles = isPrelim ? [] : buildFirstRoundBattles(prelimRanked, currentRound);
@@ -682,10 +685,14 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const submitPrelimScore=async(pid)=>{
     const val=parseFloat(scoreInputs[pid]);
     if(isNaN(val)||val<1||val>10)return showToast("Score must be 1–10","error");
-    const{error}=await supabase.from("scores").upsert(
-      {participant_id:pid,event_id:event.id,category:myCategory,judge_key:myKey,score:val},
-      {onConflict:"participant_id,judge_key"}
-    );
+    // Try upsert first; if the unique constraint doesn't include category, fall back to update/insert
+    const existing=scores.find(s=>s.participant_id===pid&&s.judge_key===myKey&&s.event_id===event.id);
+    let error;
+    if(existing){
+      ({error}=await supabase.from("scores").update({score:val}).eq("id",existing.id));
+    } else {
+      ({error}=await supabase.from("scores").insert({participant_id:pid,event_id:event.id,category:myCategory,judge_key:myKey,score:val}));
+    }
     if(error)return showToast("Score failed: "+error.message,"error");
     setScoreInputs(prev=>({...prev,[pid]:""}));
     showToast("Score submitted ✓");
@@ -1248,21 +1255,24 @@ function Dashboard({ event, onBack, showToast }) {
   const [participants,setParticipants]=useState([]);
   const [scores,setScores]=useState([]);
   const [battles,setBattles]=useState([]);
+  const [attendees,setAttendees]=useState([]);
   const [loading,setLoading]=useState(true);
 
   useEffect(()=>{
     const load=async()=>{
       setLoading(true);
-      const[jcRes,pRes,sRes,bRes]=await Promise.all([
+      const[jcRes,pRes,sRes,bRes,aRes]=await Promise.all([
         supabase.from("judge_codes").select("*").eq("event_id",event.id),
         supabase.from("participants").select("*").eq("event_id",event.id),
         supabase.from("scores").select("*").eq("event_id",event.id),
         supabase.from("battle_decisions").select("*").eq("event_id",event.id),
+        supabase.from("attendees").select("*").eq("event_id",event.id),
       ]);
       if(jcRes.data)setJudgeCodes(jcRes.data);
       if(pRes.data)setParticipants(pRes.data);
       if(sRes.data)setScores(sRes.data);
       if(bRes.data)setBattles(bRes.data);
+      if(aRes.data)setAttendees(aRes.data);
       setLoading(false);
     };
     load();
@@ -1277,29 +1287,34 @@ function Dashboard({ event, onBack, showToast }) {
   },[event.id]);
 
   const col=getCatColor(categories,activeCat);
-  const catJudges=judgeCodes.filter(j=>j.category===activeCat&&j.used);
-  const catParts=participants.filter(p=>p.category===activeCat);
-  const scoreMap={};
-  scores.forEach(s=>{if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score;});
-  const getScore=(pid)=>calcAvgScore(Object.values(scoreMap[pid]||{}));
-  const catSorted=[...catParts].sort((a,b)=>getScore(b.id)-getScore(a.id));
-  const regJudges=judgeCodes.filter(j=>j.used);
-  const biasAlerts=catParts.flatMap(p=>detectBias(scoreMap[p.id]||{}).map(f=>({...f,participant:p.name})));
-  const totalBias=participants.flatMap(p=>detectBias(scoreMap[p.id]||{})).length;
-  const checkedIn=catParts.filter(p=>p.checked_in);
-  const prelimRanked=[...checkedIn].sort((a,b)=>getScore(b.id)-getScore(a.id));
+  const catJudges=useMemo(()=>judgeCodes.filter(j=>j.category===activeCat&&j.used),[judgeCodes,activeCat]);
+  const catParts=useMemo(()=>participants.filter(p=>p.category===activeCat),[participants,activeCat]);
+  const scoreMap=useMemo(()=>{
+    const m={};
+    scores.forEach(s=>{if(!m[s.participant_id])m[s.participant_id]={};m[s.participant_id][s.judge_key]=s.score;});
+    return m;
+  },[scores]);
+  const getScore=useCallback((pid)=>calcAvgScore(Object.values(scoreMap[pid]||{})),[scoreMap]);
+  const catSorted=useMemo(()=>[...catParts].sort((a,b)=>getScore(b.id)-getScore(a.id)),[catParts,getScore]);
+  const regJudges=useMemo(()=>judgeCodes.filter(j=>j.used),[judgeCodes]);
+  const biasAlerts=useMemo(()=>catParts.flatMap(p=>detectBias(scoreMap[p.id]||{}).map(f=>({...f,participant:p.name}))),[catParts,scoreMap]);
+  const totalBias=useMemo(()=>participants.flatMap(p=>detectBias(scoreMap[p.id]||{})).length,[participants,scoreMap]);
+  const checkedIn=useMemo(()=>catParts.filter(p=>p.checked_in),[catParts]);
+  const prelimRanked=useMemo(()=>[...checkedIn].sort((a,b)=>getScore(b.id)-getScore(a.id)),[checkedIn,getScore]);
 
-  const addParticipant=async(form)=>{
+  const addParticipant=useCallback(async(form)=>{
     if(!form.name.trim()||!form.city.trim())return showToast("Fill name and city!","error");
     const{error}=await supabase.from("participants").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone?.trim()||null,category:activeCat});
     if(error)return showToast("Failed: "+error.message,"error");
     showToast(`${form.name} added to ${activeCat}!`);
-  };
-  const checkIn=async(id)=>{const{error}=await supabase.from("participants").update({checked_in:true}).eq("id",id);if(error)return showToast("Check-in failed!","error");showToast("Dancer checked in ✓");};
+  },[activeCat,event.id,showToast]);
+  const checkIn=useCallback(async(id)=>{const{error}=await supabase.from("participants").update({checked_in:true}).eq("id",id);if(error)return showToast("Check-in failed!","error");showToast("Dancer checked in ✓");},[showToast]);
   const endEvent=async()=>{const{error}=await supabase.from("events").delete().eq("id",event.id);if(error)return showToast("Failed!","error");onBack();};
 
   const exportCSV=()=>{
-    const rows=[["Category","Participant","City","Phone","Checked In","Prelim Score",...rounds.filter(r=>r!=="Prelims").map(r=>`${r} Result`)]];
+    // Section 1: Competition Participants with scores
+    const rows=[["=== COMPETITION PARTICIPANTS ==="],
+      ["Category","Name","City","Phone","Checked In","Prelim Score",...rounds.filter(r=>r!=="Prelims").map(r=>`${r} Result`)]];
     participants.forEach(p=>{
       const prelimScore=getScore(p.id)||"";
       const roundResults=rounds.filter(r=>r!=="Prelims").map(r=>{
@@ -1314,6 +1329,14 @@ function Dashboard({ event, onBack, showToast }) {
       });
       rows.push([p.category,p.name,p.city,p.phone||"",p.checked_in?"Yes":"No",prelimScore,...roundResults]);
     });
+
+    // Section 2: Attendees / Viewers
+    rows.push([],["=== ATTENDEES & VIEWERS ==="],["Type","Name","City","Phone","Category"]);
+    attendees.forEach(a=>{
+      rows.push([a.role==="participant"?"Registered Participant":"Viewer/Attendee",a.name,a.city||"",a.phone||"",a.category||""]);
+    });
+    if(attendees.length===0) rows.push(["(none registered)"]);
+
     const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);const a=document.createElement("a");
     a.href=url;a.download=`${event.name.replace(/\s+/g,"-")}-export.csv`;a.click();URL.revokeObjectURL(url);
@@ -1547,7 +1570,12 @@ function Dashboard({ event, onBack, showToast }) {
         {tab==="export"&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>EXPORT EVENT DATA</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:24}}>CSV includes participants, prelim scores (seeding only), and knockout battle results per round.</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:16}}>CSV includes: competition participants with prelim scores and knockout results, plus all registered attendees and viewers.</div>
+            <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+              <div style={{background:"#0f0f0f",border:"1px solid #181818",borderRadius:8,padding:"8px 14px",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888"}}>
+                📋 <strong style={{color:"#fff"}}>{participants.length}</strong> participants · <strong style={{color:"#00e5ff"}}>{attendees.filter(a=>a.role==="attendee").length}</strong> viewers · <strong style={{color:"#ffd700"}}>{attendees.filter(a=>a.role==="participant").length}</strong> registered participants
+              </div>
+            </div>
             <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
               <button className="btn" style={{background:"#00c853",color:"#000",fontSize:13,padding:"13px 28px"}} onClick={exportCSV}>⬇ EXPORT ALL DATA (CSV)</button>
             </div>
