@@ -114,70 +114,59 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────────
 // SCREEN: LANDING
 // ─────────────────────────────────────────────────────────────────
-function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeReg, onJudgeLogin }) {
+// SCREEN: LANDING
+// ─────────────────────────────────────────────────────────────────
+function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", background: "#080808" }}>
       <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 64, letterSpacing: 6, lineHeight: 1 }}>DAN<span style={{ color: "#ff4d4d" }}>BUZZ</span></div>
       <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#444", letterSpacing: 4, marginBottom: 52 }}>BATTLE MANAGEMENT SYSTEM</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 320 }}>
-        <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", fontSize: 14, padding: "15px" }} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
+        <button className="btn" style={{ background: "#ff4d4d", color: "#000", fontSize: 14, padding: "15px" }} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
         <button className="btn" style={{ background: "#111", color: "#aaa", border: "1px solid #222", fontSize: 13, padding: "14px" }} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", fontSize: 12, padding: "10px" }} onClick={onJudgeReg}>FIRST TIME? JUDGE REGISTRATION</button>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#333", marginTop: 4 }}>First time as a judge? Use Judge Login — it handles registration too.</div>
       </div>
-      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#1e1e1e", letterSpacing: 2, marginTop: 52 }}>CUSTOM CATEGORIES · REAL-TIME · POWERED BY SUPABASE</div>
-      {/* Hidden admin entry — subtle, not visible at a glance */}
-      <button
-        style={{ position: "fixed", bottom: 12, right: 16, background: "none", border: "none", cursor: "pointer", color: "#1e1e1e", fontFamily: "Barlow,sans-serif", fontSize: 9, letterSpacing: 1, padding: 4 }}
-        onClick={onAdminLogin}
-      >
-        admin
-      </button>
+      <div style={{ marginTop: 52, borderTop: "1px solid #111", paddingTop: 20 }}>
+        <button style={{ background: "none", border: "none", color: "#1e1e1e", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 9, letterSpacing: 3 }} onClick={onAdminLogin}>ADMIN</button>
+      </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SCREEN: ADMIN LOGIN (DanBuzz internal only)
+// SCREEN: ADMIN LOGIN (DanBuzz only — email + password via Supabase Auth)
 // ─────────────────────────────────────────────────────────────────
-const ADMIN_PASSWORD = "DANBUZZ2025"; // Change this to your preferred admin password
+function AdminLoginScreen({ onBack, onLogin, showToast }) {
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading]   = useState(false);
 
-function AdminLoginScreen({ onBack, onSuccess, showToast }) {
-  const [pass, setPass]     = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const submit = () => {
-    if (!pass.trim()) return showToast("Enter admin password!", "error");
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) return showToast("Fill in all fields!", "error");
     setLoading(true);
-    setTimeout(() => {
-      if (pass.trim() === ADMIN_PASSWORD) {
-        onSuccess();
-      } else {
-        showToast("Incorrect password.", "error");
-      }
-      setLoading(false);
-    }, 400);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { showToast(error.message, "error"); setLoading(false); return; }
+    onLogin(data.user);
+    setLoading(false);
   };
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
       <div style={{ width: "100%", maxWidth: 360 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>DANBUZZ ADMIN</div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Restricted access. Enter your admin password to create a new event.</div>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>ADMIN PASSWORD</div>
-          <input
-            className="inp"
-            type="password"
-            placeholder="••••••••"
-            value={pass}
-            onChange={(e) => setPass(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            autoFocus
-          />
+        <button className="btn" style={{ background: "transparent", color: "#333", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 12, color: "#ff4d4d", letterSpacing: 4, marginBottom: 4 }}>DANBUZZ</div>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>ADMIN LOGIN</div>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Restricted to DanBuzz administrators only.</div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>EMAIL</div>
+          <input className="inp" type="email" placeholder="admin@danbuzz.com" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={submit} disabled={loading}>
-          {loading ? <Spinner /> : "ACCESS →"}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>PASSWORD</div>
+          <input className="inp" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleLogin()} />
+        </div>
+        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={handleLogin} disabled={loading}>
+          {loading ? <Spinner /> : "LOGIN →"}
         </button>
       </div>
     </div>
@@ -185,15 +174,105 @@ function AdminLoginScreen({ onBack, onSuccess, showToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SCREEN: CREATE EVENT (with custom category builder)
+// SCREEN: ADMIN DASHBOARD — create & manage all events
 // ─────────────────────────────────────────────────────────────────
-function CreateEventScreen({ onBack, onCreate, showToast }) {
-  const [form, setForm]         = useState({ name: "", date: "", city: "" });
-  const [categories, setCategories] = useState([]);
+function AdminDashboard({ onBack, showToast }) {
+  const [tab, setTab]         = useState("events");
+  const [events, setEvents]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadEvents = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("events").select("*").order("created_at", { ascending: false });
+    setEvents(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadEvents(); }, []);
+
+  const deleteEvent = async (id, name) => {
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    const { error } = await supabase.from("events").delete().eq("id", id);
+    if (error) return showToast("Delete failed: " + error.message, "error");
+    showToast("Event deleted ✓");
+    loadEvents();
+  };
+
+  return (
+    <div style={{ fontFamily: "'Bebas Neue',Impact,sans-serif", background: "#080808", minHeight: "100vh", color: "#fff" }}>
+      {/* Header */}
+      <div style={{ padding: "22px 22px 0", maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 36, letterSpacing: 4, lineHeight: 1 }}>DAN<span style={{ color: "#ff4d4d" }}>BUZZ</span> <span style={{ fontSize: 14, color: "#ff4d4d", letterSpacing: 3 }}>ADMIN</span></div>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 4 }}>{events.length} events total</div>
+          </div>
+          <button className="btn" style={{ background: "transparent", color: "#555", border: "1px solid #222", fontSize: 11 }} onClick={onBack}>← LOGOUT</button>
+        </div>
+        {/* Tabs */}
+        <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a" }}>
+          {[{ key: "events", label: "ALL EVENTS" }, { key: "create", label: "+ CREATE EVENT" }].map((t) => (
+            <button key={t.key} className="tbtn" style={{ color: tab === t.key ? "#ff4d4d" : "#555", borderBottom: tab === t.key ? "3px solid #ff4d4d" : "3px solid transparent" }} onClick={() => setTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 22px 40px", maxWidth: 1100, margin: "0 auto" }}>
+        {/* ALL EVENTS */}
+        {tab === "events" && (
+          <div className="slide">
+            {loading ? <div style={{ textAlign: "center", padding: 48 }}><Spinner /></div> : events.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px", fontFamily: "Barlow,sans-serif", color: "#333" }}>No events yet — create one using the tab above.</div>
+            ) : events.map((ev) => {
+              const cats = ev.categories || [];
+              return (
+                <div key={ev.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, padding: "16px 20px", marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 2 }}>{ev.name}</div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{ev.city} · {ev.date}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                      {cats.slice(0, 5).map((cat, i) => {
+                        const c = PALETTE[i % PALETTE.length];
+                        return <span key={cat} style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, padding: "2px 8px", borderRadius: 10, background: c.bg, border: `1px solid ${c.border}`, color: c.primary }}>{cat}</span>;
+                      })}
+                      {cats.length > 5 && <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#444" }}>+{cats.length - 5} more</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ background: "#0f0f0f", border: "1px solid #ff4d4d22", borderRadius: 7, padding: "6px 12px" }}>
+                      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 8, color: "#555", letterSpacing: 2 }}>ORG CODE</div>
+                      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, color: "#ff4d4d", letterSpacing: 2 }}>{ev.org_code}</div>
+                    </div>
+                    <button className="btn" style={{ fontSize: 10, background: "#1a0a0a", color: "#ff4d4d", border: "1px solid #ff4d4d33" }} onClick={() => deleteEvent(ev.id, ev.name)}>DELETE</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* CREATE EVENT */}
+        {tab === "create" && (
+          <AdminCreateEvent showToast={showToast} onCreated={() => { setTab("events"); loadEvents(); }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ADMIN: CREATE EVENT sub-component
+// ─────────────────────────────────────────────────────────────────
+function AdminCreateEvent({ showToast, onCreated }) {
+  const [form, setForm]               = useState({ name: "", date: "", city: "", organizer: "" });
+  const [categories, setCategories]   = useState([]);
   const [customInput, setCustomInput] = useState("");
-  const [judgeCountInput, setJudgeCountInput] = useState("");
   const [judgeCounts, setJudgeCounts] = useState({});
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [createdEvent, setCreatedEvent] = useState(null);
+  const [copied, setCopied]           = useState(null);
+
+  const copy = (val) => { navigator.clipboard?.writeText(val).catch(() => {}); setCopied(val); setTimeout(() => setCopied(null), 1500); };
 
   const addCategory = (cat) => {
     const trimmed = cat.trim();
@@ -202,35 +281,27 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
     setCategories((prev) => [...prev, trimmed]);
     setCustomInput("");
   };
-
   const removeCategory = (cat) => {
     setCategories((prev) => prev.filter((c) => c !== cat));
     setJudgeCounts((prev) => { const n = { ...prev }; delete n[cat]; return n; });
   };
-
   const toggleSuggested = (cat) => {
-    if (categories.map((c) => c.toLowerCase()).includes(cat.toLowerCase())) {
-      removeCategory(cat);
-    } else {
-      addCategory(cat);
-    }
+    if (categories.map((c) => c.toLowerCase()).includes(cat.toLowerCase())) removeCategory(cat);
+    else addCategory(cat);
   };
 
   const submit = async () => {
     if (!form.name.trim() || !form.date || !form.city.trim()) return showToast("Fill in event name, date and city!", "error");
     if (categories.length === 0) return showToast("Add at least one category!", "error");
     setLoading(true);
-
-    const orgCode = genOrgCode();
-    const prefix  = randAlpha(3);
+    const orgCode    = genOrgCode();
+    const prefix     = randAlpha(3);
     const judgeCodes = genJudgeCodes(prefix, categories, judgeCounts);
 
     const { data: eventData, error: eventError } = await supabase
       .from("events")
-      .insert({ name: form.name.trim(), city: form.city.trim(), date: form.date, org_code: orgCode, categories })
-      .select()
-      .single();
-
+      .insert({ name: form.name.trim(), city: form.city.trim(), date: form.date, org_code: orgCode, categories, organizer_name: form.organizer.trim() || null })
+      .select().single();
     if (eventError) { showToast("Failed to create event: " + eventError.message, "error"); setLoading(false); return; }
 
     const { error: codesError } = await supabase.from("judge_codes").insert(
@@ -239,93 +310,120 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
     if (codesError) { showToast("Failed to generate judge codes!", "error"); setLoading(false); return; }
 
     const { data: fullCodes } = await supabase.from("judge_codes").select("*").eq("event_id", eventData.id);
-    onCreate({ ...eventData, judgeCodes: fullCodes || [] });
+    setCreatedEvent({ ...eventData, judgeCodes: fullCodes || [] });
+    showToast(`Event "${eventData.name}" created ✓`);
     setLoading(false);
   };
 
-  return (
-    <div style={{ minHeight: "100vh", background: "#080808", padding: 32, maxWidth: 600, margin: "0 auto" }}>
-      <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
-      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 28, letterSpacing: 3, marginBottom: 6 }}>CREATE NEW EVENT</div>
-      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Set up your event details and build your custom category list.</div>
+  if (createdEvent) {
+    const codes = createdEvent.judgeCodes || [];
+    return (
+      <div className="slide">
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 12, color: "#00c853", letterSpacing: 3, marginBottom: 6 }}>✓ EVENT CREATED</div>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 2, marginBottom: 2 }}>{createdEvent.name}</div>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 20 }}>{createdEvent.city} · {createdEvent.date}{createdEvent.organizer_name ? ` · Organizer: ${createdEvent.organizer_name}` : ""}</div>
 
-      {/* Basic info */}
+        {/* Org code */}
+        <div style={{ background: "#0f0f0f", border: "1px solid #ff4d4d44", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#ff4d4d", letterSpacing: 3, marginBottom: 8 }}>ORGANIZER CODE — Share this with the event organizer</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 34, letterSpacing: 6, color: "#ff4d4d" }}>{createdEvent.org_code}</div>
+            <button className="btn" style={{ fontSize: 10, padding: "6px 14px", background: "transparent", border: "1px solid #ff4d4d44", color: "#ff4d4d" }} onClick={() => copy(createdEvent.org_code)}>
+              {copied === createdEvent.org_code ? "✓ COPIED" : "COPY"}
+            </button>
+          </div>
+        </div>
+
+        {/* Judge codes per category */}
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 3, marginBottom: 14 }}>JUDGE CODES — Share each one with the respective judge</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12, marginBottom: 24 }}>
+          {(createdEvent.categories || []).map((cat, catIdx) => {
+            const c = PALETTE[catIdx % PALETTE.length];
+            const catCodes = codes.filter((j) => j.category === cat);
+            return (
+              <div key={cat} style={{ background: "#0f0f0f", border: `1px solid ${c.border}`, borderRadius: 10, padding: 16 }}>
+                <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 2, color: c.primary, marginBottom: 10 }}>{cat}</div>
+                {catCodes.map((j) => (
+                  <div key={j.code} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7, padding: "7px 10px", background: "#151515", borderRadius: 7 }}>
+                    <div>
+                      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 13, letterSpacing: 2 }}>{j.code}</div>
+                      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#555" }}>Judge {j.slot}</div>
+                    </div>
+                    <button className="btn" style={{ fontSize: 9, padding: "4px 9px", background: "transparent", border: `1px solid ${c.primary}`, color: c.primary }} onClick={() => copy(j.code)}>
+                      {copied === j.code ? "✓" : "COPY"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", fontSize: 12 }} onClick={() => { setCreatedEvent(null); setForm({ name: "", date: "", city: "", organizer: "" }); setCategories([]); setJudgeCounts({}); onCreated(); }}>
+          ← BACK TO ALL EVENTS
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="slide" style={{ maxWidth: 640 }}>
+      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 22, letterSpacing: 3, marginBottom: 20 }}>CREATE NEW EVENT</div>
+
+      {/* Organizer name */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>ORGANIZER NAME <span style={{ color: "#333" }}>(optional)</span></div>
+        <input className="inp" placeholder="e.g. Rhythmix Crew, Battle Zone NE" value={form.organizer} onChange={(e) => setForm((f) => ({ ...f, organizer: e.target.value }))} />
+      </div>
+
       {[["Event Name", "name", "text", "e.g. Danbuzz Open 2025"], ["City / Venue", "city", "text", "e.g. Imphal, Manipur"], ["Event Date", "date", "date", ""]].map(([label, key, type, ph]) => (
-        <div key={key} style={{ marginBottom: 16 }}>
+        <div key={key} style={{ marginBottom: 14 }}>
           <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>{label}</div>
           <input className="inp" type={type} placeholder={ph} value={form[key]} onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
         </div>
       ))}
 
-      {/* Category builder */}
-      <div style={{ margin: "28px 0 0" }}>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>CATEGORIES <span style={{ color: "#ff4d4d" }}>*</span></div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#444", marginBottom: 14 }}>
-          Click suggestions to add, or type a custom category name and press Enter.
-        </div>
-
-        {/* Suggestions */}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+      {/* Categories */}
+      <div style={{ margin: "20px 0 0" }}>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 10 }}>CATEGORIES <span style={{ color: "#ff4d4d" }}>*</span></div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
           {SUGGESTED_CATEGORIES.map((cat) => {
             const isAdded = categories.map((c) => c.toLowerCase()).includes(cat.toLowerCase());
-            return (
-              <button key={cat} className={`chip${isAdded ? " active" : ""}`} onClick={() => toggleSuggested(cat)}>
-                {isAdded ? "✓ " : "+ "}{cat}
-              </button>
-            );
+            return <button key={cat} className={`chip${isAdded ? " active" : ""}`} onClick={() => toggleSuggested(cat)}>{isAdded ? "✓ " : "+ "}{cat}</button>;
           })}
         </div>
-
-        {/* Custom input */}
-        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-          <input
-            className="inp"
-            placeholder="Type a custom category name..."
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(customInput); } }}
-          />
-          <button className="btn" style={{ background: "#1a1a1a", color: "#fff", border: "1px solid #2a2a2a", whiteSpace: "nowrap" }} onClick={() => addCategory(customInput)}>
-            + ADD
-          </button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <input className="inp" placeholder="Custom category..." value={customInput} onChange={(e) => setCustomInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCategory(customInput); } }} />
+          <button className="btn" style={{ background: "#1a1a1a", color: "#fff", border: "1px solid #2a2a2a", whiteSpace: "nowrap" }} onClick={() => addCategory(customInput)}>+ ADD</button>
         </div>
-
-        {/* Selected categories */}
-        {categories.length > 0 ? (
-          <div style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 12, padding: 16, marginBottom: 8 }}>
-            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 12 }}>
-              YOUR EVENT CATEGORIES ({categories.length}) — Set judges per category
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {categories.length > 0 && (
+          <div style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 12, padding: 14, marginBottom: 8 }}>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 10 }}>CATEGORIES ({categories.length}) — Judges per category</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {categories.map((cat, i) => {
                 const c = PALETTE[i % PALETTE.length];
                 const count = judgeCounts[cat] || 3;
                 return (
                   <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: "8px 12px" }}>
-                    <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 1, color: c.primary, flex: 1 }}>{cat}</span>
+                    <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 13, color: c.primary, flex: 1 }}>{cat}</span>
                     <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>Judges:</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <button onClick={() => setJudgeCounts((prev) => ({ ...prev, [cat]: Math.max(1, (parseInt(prev[cat]) || 3) - 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>−</button>
+                      <button onClick={() => setJudgeCounts((p) => ({ ...p, [cat]: Math.max(1, (parseInt(p[cat]) || 3) - 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>−</button>
                       <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16, color: c.primary, minWidth: 18, textAlign: "center" }}>{count}</span>
-                      <button onClick={() => setJudgeCounts((prev) => ({ ...prev, [cat]: Math.min(10, (parseInt(prev[cat]) || 3) + 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>+</button>
+                      <button onClick={() => setJudgeCounts((p) => ({ ...p, [cat]: Math.min(10, (parseInt(p[cat]) || 3) + 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>+</button>
                     </div>
-                    <button onClick={() => removeCategory(cat)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 14, padding: 0, lineHeight: 1, marginLeft: 4 }}>✕</button>
+                    <button onClick={() => removeCategory(cat)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontSize: 14, padding: 0 }}>✕</button>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#444", marginTop: 12 }}>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#444", marginTop: 10 }}>
               Total judge codes: {categories.reduce((sum, cat) => sum + (parseInt(judgeCounts[cat]) || 3), 0)}
             </div>
-          </div>
-        ) : (
-          <div style={{ background: "#0f0f0f", border: "1px dashed #2a2a2a", borderRadius: 12, padding: "24px", textAlign: "center", marginBottom: 8 }}>
-            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#333" }}>No categories yet — add some above ↑</div>
           </div>
         )}
       </div>
 
-      <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", marginTop: 24, fontSize: 14, padding: "13px" }} onClick={submit} disabled={loading || categories.length === 0}>
+      <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", marginTop: 20, fontSize: 14, padding: "13px" }} onClick={submit} disabled={loading || categories.length === 0}>
         {loading ? <Spinner /> : `CREATE EVENT WITH ${categories.length} CATEGOR${categories.length === 1 ? "Y" : "IES"} →`}
       </button>
     </div>
@@ -333,66 +431,35 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SCREEN: EVENT CREATED
+// SCREEN: ORGANIZER LOGIN (code only — org codes issued by DanBuzz admin)
 // ─────────────────────────────────────────────────────────────────
-function EventCreatedScreen({ event, onEnter }) {
-  const [copied, setCopied] = useState(null);
-  const copy = (val) => { navigator.clipboard?.writeText(val).catch(() => {}); setCopied(val); setTimeout(() => setCopied(null), 1500); };
-  const codes      = event.judgeCodes || [];
-  const categories = event.categories || [];
+function OrgLoginScreen({ onBack, onLogin, showToast }) {
+  const [orgCode, setOrgCode] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!orgCode.trim()) return showToast("Enter your organizer code!", "error");
+    setLoading(true);
+    const { data, error } = await supabase.from("events").select("*").eq("org_code", orgCode.trim().toUpperCase()).single();
+    if (error || !data) { showToast("Invalid organizer code! Contact DanBuzz admin.", "error"); setLoading(false); return; }
+    onLogin(data);
+    setLoading(false);
+  };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080808", padding: 32, maxWidth: 720, margin: "0 auto" }}>
-      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 12, color: "#00c853", letterSpacing: 3, marginBottom: 6 }}>✓ EVENT CREATED & SAVED</div>
-      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 30, letterSpacing: 2, marginBottom: 2 }}>{event.name}</div>
-      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 4 }}>{event.city} · {event.date}</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 28 }}>
-        {categories.map((cat, i) => {
-          const c = PALETTE[i % PALETTE.length];
-          return <span key={cat} style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, padding: "3px 10px", borderRadius: 20, background: c.bg, border: `1px solid ${c.border}`, color: c.primary }}>{cat}</span>;
-        })}
-      </div>
-
-      {/* Organizer code */}
-      <div style={{ background: "#0f0f0f", border: "1px solid #ff4d4d44", borderRadius: 12, padding: 20, marginBottom: 24 }}>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#ff4d4d", letterSpacing: 3, marginBottom: 10 }}>YOUR ORGANIZER CODE — Save this, it's the only way back in</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-          <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 34, letterSpacing: 6, color: "#ff4d4d" }}>{event.org_code}</div>
-          <button className="btn" style={{ fontSize: 10, padding: "6px 14px", background: "transparent", border: "1px solid #ff4d4d44", color: "#ff4d4d" }} onClick={() => copy(event.org_code)}>
-            {copied === event.org_code ? "✓ COPIED" : "COPY"}
-          </button>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>ORGANIZER LOGIN</div>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Enter the organizer code provided by DanBuzz admin to access your event dashboard.</div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>ORGANIZER CODE</div>
+          <input className="inp" placeholder="e.g. ORG-XYZ-1234" value={orgCode} onChange={(e) => setOrgCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && handleSubmit()} style={{ letterSpacing: 3, fontFamily: "Bebas Neue,sans-serif", fontSize: 20 }} />
         </div>
+        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={handleSubmit} disabled={loading}>
+          {loading ? <Spinner /> : "ENTER DASHBOARD →"}
+        </button>
       </div>
-
-      {/* Judge codes per category */}
-      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 3, marginBottom: 14 }}>
-        JUDGE CODES — Share each one individually
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12, marginBottom: 32 }}>
-        {categories.map((cat, catIdx) => {
-          const c        = PALETTE[catIdx % PALETTE.length];
-          const catCodes = codes.filter((j) => j.category === cat);
-          return (
-            <div key={cat} style={{ background: "#0f0f0f", border: `1px solid ${c.border}`, borderRadius: 10, padding: 16 }}>
-              <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 2, color: c.primary, marginBottom: 12 }}>{cat}</div>
-              {catCodes.map((j) => (
-                <div key={j.code} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, padding: "8px 12px", background: "#151515", borderRadius: 7 }}>
-                  <div>
-                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 2, color: "#fff" }}>{j.code}</div>
-                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>Judge {j.slot}</div>
-                  </div>
-                  <button className="btn" style={{ fontSize: 10, padding: "5px 10px", background: "transparent", border: `1px solid ${c.primary}`, color: c.primary }} onClick={() => copy(j.code)}>
-                    {copied === j.code ? "✓" : "COPY"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-      <button className="btn" style={{ background: "#ff4d4d", color: "#000", fontSize: 14, padding: "13px 32px" }} onClick={onEnter}>
-        ENTER DASHBOARD →
-      </button>
     </div>
   );
 }
@@ -401,10 +468,14 @@ function EventCreatedScreen({ event, onEnter }) {
 // SCREEN: JUDGE LOGIN
 // ─────────────────────────────────────────────────────────────────
 function JudgeLoginScreen({ onBack, onLogin, showToast }) {
-  const [code, setCode]     = useState("");
+  const [code, setCode]       = useState("");
+  const [name, setName]       = useState("");
   const [loading, setLoading] = useState(false);
+  // "peek" holds the judge_codes row after code is validated, before name confirmed
+  const [peek, setPeek]       = useState(null);
 
-  const login = async () => {
+  // Step 1 — validate code, show what we know
+  const checkCode = async () => {
     if (!code.trim()) return showToast("Enter your judge code!", "error");
     setLoading(true);
     const upper = code.trim().toUpperCase();
@@ -413,28 +484,104 @@ function JudgeLoginScreen({ onBack, onLogin, showToast }) {
       .select("*, events(*)")
       .eq("code", upper)
       .single();
-    if (error || !jc) { showToast("Invalid code. Ask your organizer.", "error"); setLoading(false); return; }
-    if (!jc.used) { showToast("Code not yet registered. Use Judge Registration first.", "error"); setLoading(false); return; }
-    onLogin({ judgeCode: jc, event: jc.events });
+    if (error || !jc) { showToast("Invalid code. Contact DanBuzz admin.", "error"); setLoading(false); return; }
+    setPeek(jc);
     setLoading(false);
   };
 
+  // Step 2 — confirm name, register if first time or verify if returning
+  const confirmName = async () => {
+    if (!name.trim()) return showToast("Enter your name!", "error");
+    setLoading(true);
+    if (!peek.used) {
+      // First time — register name against this code
+      const { error } = await supabase
+        .from("judge_codes")
+        .update({ used: true, judge_name: name.trim() })
+        .eq("code", peek.code);
+      if (error) { showToast("Registration failed. Try again.", "error"); setLoading(false); return; }
+      const updated = { ...peek, used: true, judge_name: name.trim() };
+      showToast(`Welcome, ${name.trim()}! You're now registered ✓`);
+      onLogin({ judgeCode: updated, event: peek.events });
+    } else {
+      // Returning — verify name matches (case-insensitive)
+      if (peek.judge_name.trim().toLowerCase() !== name.trim().toLowerCase()) {
+        showToast("Name doesn't match. Enter the name you registered with.", "error");
+        setLoading(false);
+        return;
+      }
+      onLogin({ judgeCode: peek, event: peek.events });
+    }
+    setLoading(false);
+  };
+
+  const categories  = peek?.events?.categories || [];
+  const catIdx      = categories.indexOf(peek?.category);
+  const c           = PALETTE[catIdx >= 0 ? catIdx % PALETTE.length : 0];
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
-      <div style={{ width: "100%", maxWidth: 380 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={() => { if (peek) { setPeek(null); setName(""); } else onBack(); }}>← BACK</button>
         <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>JUDGE LOGIN</div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Enter your judge code to access your scoring panel and view the leaderboard.</div>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>JUDGE CODE</div>
-          <input className="inp" placeholder="Your judge code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && login()} style={{ letterSpacing: 2, fontFamily: "Bebas Neue,sans-serif", fontSize: 18 }} />
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>
+          {!peek ? "Enter your judge code and name to access your scoring panel." : peek.used ? "Welcome back! Confirm your name to continue." : "First time? Your name will be registered to this code."}
         </div>
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={login} disabled={loading}>
-          {loading ? <Spinner /> : "LOGIN AS JUDGE →"}
-        </button>
-        <div style={{ marginTop: 16, textAlign: "center", fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555" }}>
-          First time? <button style={{ background: "none", border: "none", color: "#ff4d4d", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 11, padding: 0 }} onClick={() => onBack("judgeReg")}>Register here</button>
-        </div>
+
+        {/* Step 1 — Code input */}
+        {!peek ? (
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>JUDGE CODE</div>
+              <input className="inp" placeholder="Code from DanBuzz admin" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && checkCode()} style={{ letterSpacing: 2, fontFamily: "Bebas Neue,sans-serif", fontSize: 18 }} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>YOUR NAME</div>
+              <input className="inp" placeholder="Your full name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && checkCode()} />
+            </div>
+            <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={async () => {
+              if (!code.trim()) return showToast("Enter your judge code!", "error");
+              if (!name.trim()) return showToast("Enter your name!", "error");
+              setLoading(true);
+              const upper = code.trim().toUpperCase();
+              const { data: jc, error } = await supabase.from("judge_codes").select("*, events(*)").eq("code", upper).single();
+              if (error || !jc) { showToast("Invalid code. Contact DanBuzz admin.", "error"); setLoading(false); return; }
+              // Register or verify inline
+              if (!jc.used) {
+                const { error: ue } = await supabase.from("judge_codes").update({ used: true, judge_name: name.trim() }).eq("code", upper);
+                if (ue) { showToast("Registration failed. Try again.", "error"); setLoading(false); return; }
+                showToast(`Welcome, ${name.trim()}! Registered ✓`);
+                onLogin({ judgeCode: { ...jc, used: true, judge_name: name.trim() }, event: jc.events });
+              } else {
+                if (jc.judge_name.trim().toLowerCase() !== name.trim().toLowerCase()) {
+                  showToast("Name doesn't match. Enter the name you registered with.", "error");
+                  setLoading(false); return;
+                }
+                onLogin({ judgeCode: jc, event: jc.events });
+              }
+              setLoading(false);
+            }} disabled={loading}>
+              {loading ? <Spinner /> : "LOGIN →"}
+            </button>
+          </>
+        ) : (
+          /* Step 2 — Confirm with event/category preview */
+          <>
+            <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 20 }}>
+              <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: c.primary, letterSpacing: 3, marginBottom: 6 }}>CODE VERIFIED</div>
+              <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 20, letterSpacing: 2, color: c.primary }}>{peek.category} · Judge {peek.slot}</div>
+              <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{peek.events?.name} · {peek.events?.city}</div>
+              {peek.used && <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#00c853", marginTop: 6 }}>Registered as: <strong>{peek.judge_name}</strong></div>}
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>{peek.used ? "CONFIRM YOUR NAME" : "ENTER YOUR NAME"}</div>
+              <input className="inp" placeholder={peek.used ? `Enter "${peek.judge_name}"` : "Your full name"} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmName()} autoFocus />
+            </div>
+            <button className="btn" style={{ background: c.primary, color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={confirmName} disabled={loading}>
+              {loading ? <Spinner /> : peek.used ? "CONFIRM & LOGIN →" : "REGISTER & LOGIN →"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -651,236 +798,6 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// SCREEN: ORGANIZER LOGIN
-// ─────────────────────────────────────────────────────────────────
-function OrgLoginScreen({ onBack, onLogin, showToast }) {
-  const [mode, setMode]         = useState("choose");
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-  const [isSignup, setIsSignup] = useState(false);
-  const [orgCode, setOrgCode]   = useState("");
-  const [loading, setLoading]   = useState(false);
-
-  const handleEmailSubmit = async () => {
-    if (!email.trim() || !password.trim()) return showToast("Fill in all fields!", "error");
-    setLoading(true);
-    if (isSignup) {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) { showToast(error.message, "error"); setLoading(false); return; }
-      showToast("Account created! You can now log in.");
-      setIsSignup(false);
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) { showToast(error.message, "error"); setLoading(false); return; }
-      onLogin({ type: "email", user: data.user });
-    }
-    setLoading(false);
-  };
-
-  const handleCodeSubmit = async () => {
-    if (!orgCode.trim()) return showToast("Enter your organizer code!", "error");
-    setLoading(true);
-    const { data, error } = await supabase.from("events").select("*").eq("org_code", orgCode.trim().toUpperCase()).single();
-    if (error || !data) { showToast("Invalid organizer code!", "error"); setLoading(false); return; }
-    onLogin({ type: "code", event: data });
-    setLoading(false);
-  };
-
-  if (mode === "choose") return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
-      <div style={{ width: "100%", maxWidth: 360 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 24 }}>ORGANIZER LOGIN</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", padding: "16px", textAlign: "left" }} onClick={() => setMode("email")}>
-            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16, letterSpacing: 2, marginBottom: 4 }}>📧 EMAIL & PASSWORD</div>
-            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", letterSpacing: 0 }}>Log in with your account to manage your events</div>
-          </button>
-          <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", padding: "16px", textAlign: "left" }} onClick={() => setMode("code")}>
-            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16, letterSpacing: 2, marginBottom: 4 }}>🔑 EVENT CODE</div>
-            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", letterSpacing: 0 }}>Enter the organizer code from your event creation screen</div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (mode === "email") return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
-      <div style={{ width: "100%", maxWidth: 360 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={() => setMode("choose")}>← BACK</button>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 24 }}>{isSignup ? "CREATE ACCOUNT" : "SIGN IN"}</div>
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>EMAIL</div>
-          <input className="inp" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </div>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>PASSWORD</div>
-          <input className="inp" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleEmailSubmit()} />
-        </div>
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px", marginBottom: 16 }} onClick={handleEmailSubmit} disabled={loading}>
-          {loading ? <Spinner /> : isSignup ? "CREATE ACCOUNT →" : "SIGN IN →"}
-        </button>
-        <div style={{ textAlign: "center", fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555" }}>
-          {isSignup ? "Already have an account? " : "No account? "}
-          <button style={{ background: "none", border: "none", color: "#ff4d4d", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 12, padding: 0 }} onClick={() => setIsSignup(!isSignup)}>
-            {isSignup ? "Sign in" : "Create one"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
-      <div style={{ width: "100%", maxWidth: 360 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={() => setMode("choose")}>← BACK</button>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 6 }}>ENTER EVENT CODE</div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 24 }}>The organizer code was shown when your event was created.</div>
-        <input className="inp" placeholder="e.g. ORG-XYZ-1234" value={orgCode} onChange={(e) => setOrgCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && handleCodeSubmit()} style={{ letterSpacing: 3, fontFamily: "Bebas Neue,sans-serif", fontSize: 20, marginBottom: 14 }} />
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={handleCodeSubmit} disabled={loading}>
-          {loading ? <Spinner /> : "ENTER →"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// SCREEN: EVENT PICKER (after email login)
-// ─────────────────────────────────────────────────────────────────
-function EventPickerScreen({ onBack, onSelect, showToast }) {
-  const [events, setEvents]       = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [orgCode, setOrgCode]     = useState("");
-  const [codeLoading, setCodeLoading] = useState(false);
-
-  useEffect(() => {
-    supabase.from("events").select("*").order("created_at", { ascending: false }).then(({ data }) => {
-      setEvents(data || []);
-      setLoading(false);
-    });
-  }, []);
-
-  const handleCodeJoin = async () => {
-    if (!orgCode.trim()) return showToast("Enter an event code!", "error");
-    setCodeLoading(true);
-    const { data, error } = await supabase.from("events").select("*").eq("org_code", orgCode.trim().toUpperCase()).single();
-    if (error || !data) { showToast("Invalid code!", "error"); setCodeLoading(false); return; }
-    onSelect(data);
-    setCodeLoading(false);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#080808", padding: 32, maxWidth: 600, margin: "0 auto" }}>
-      <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
-      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 24 }}>SELECT EVENT</div>
-      {loading ? (
-        <div style={{ textAlign: "center", padding: 48 }}><Spinner /></div>
-      ) : events.length === 0 ? (
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 13, color: "#555", padding: "32px", textAlign: "center", background: "#111", borderRadius: 12, border: "1px solid #1e1e1e", marginBottom: 24 }}>
-          No events found. Create one from the home screen.
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 28 }}>
-          {events.map((ev) => {
-            const cats = ev.categories || [];
-            return (
-              <button key={ev.id} className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", padding: "14px 18px", textAlign: "left", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={() => onSelect(ev)}>
-                <div>
-                  <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 2 }}>{ev.name}</div>
-                  <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555", marginTop: 2 }}>{ev.city} · {ev.date}</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                    {cats.slice(0, 4).map((cat, i) => {
-                      const c = PALETTE[i % PALETTE.length];
-                      return <span key={cat} style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, padding: "2px 8px", borderRadius: 10, background: c.bg, border: `1px solid ${c.border}`, color: c.primary }}>{cat}</span>;
-                    })}
-                    {cats.length > 4 && <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#444" }}>+{cats.length - 4} more</span>}
-                  </div>
-                </div>
-                <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#ff4d4d", letterSpacing: 1 }}>MANAGE →</div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div style={{ borderTop: "1px solid #1a1a1a", paddingTop: 24 }}>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#444", letterSpacing: 2, marginBottom: 10 }}>OR ENTER EVENT CODE DIRECTLY</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input className="inp" placeholder="ORG-XXX-0000" value={orgCode} onChange={(e) => setOrgCode(e.target.value.toUpperCase())} style={{ fontFamily: "Bebas Neue,sans-serif", letterSpacing: 2, fontSize: 16 }} />
-          <button className="btn" style={{ background: "#ff4d4d", color: "#000", whiteSpace: "nowrap" }} onClick={handleCodeJoin} disabled={codeLoading}>
-            {codeLoading ? <Spinner /> : "GO →"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// SCREEN: JUDGE REGISTRATION
-// ─────────────────────────────────────────────────────────────────
-function JudgeRegScreen({ onBack, showToast }) {
-  const [code, setCode]     = useState("");
-  const [name, setName]     = useState("");
-  const [loading, setLoading] = useState(false);
-  const [done, setDone]     = useState(null);
-
-  const register = async () => {
-    if (!code.trim() || !name.trim()) return showToast("Enter your code and name!", "error");
-    setLoading(true);
-    const upper = code.trim().toUpperCase();
-    const { data: jc, error } = await supabase.from("judge_codes").select("*, events(name, city, categories)").eq("code", upper).single();
-    if (error || !jc) { showToast("Invalid code. Ask your organizer.", "error"); setLoading(false); return; }
-    if (jc.used) { showToast(`Code already used by ${jc.judge_name}!`, "error"); setLoading(false); return; }
-    const { error: updateError } = await supabase.from("judge_codes").update({ used: true, judge_name: name.trim() }).eq("code", upper);
-    if (updateError) { showToast("Registration failed. Try again.", "error"); setLoading(false); return; }
-    setDone({ category: jc.category, slot: jc.slot, judgeName: name.trim(), eventName: jc.events.name, eventCity: jc.events.city, categories: jc.events.categories || [] });
-    setLoading(false);
-  };
-
-  if (done) {
-    const catIdx = done.categories.indexOf(done.category);
-    const c = PALETTE[catIdx >= 0 ? catIdx % PALETTE.length : 0];
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808", textAlign: "center" }}>
-        <div style={{ fontSize: 52, marginBottom: 12 }}>✓</div>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 28, color: "#00c853", letterSpacing: 2, marginBottom: 4 }}>REGISTERED!</div>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 22, marginBottom: 4 }}>{done.judgeName}</div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 13, color: "#555", marginBottom: 4 }}>Judge {done.slot} · <span style={{ color: c.primary }}>{done.category}</span></div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#444", marginBottom: 28 }}>{done.eventName} · {done.eventCity}</div>
-        <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 28px", marginBottom: 28 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: c.primary, letterSpacing: 3, marginBottom: 4 }}>YOUR ROLE</div>
-          <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 24, letterSpacing: 3, color: c.primary }}>{done.category} · Judge {done.slot}</div>
-        </div>
-        <button className="btn" style={{ background: "#111", color: "#555", border: "1px solid #222" }} onClick={onBack}>← BACK TO HOME</button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
-      <div style={{ width: "100%", maxWidth: 380 }}>
-        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
-        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>JUDGE REGISTRATION</div>
-        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Enter the code your organizer gave you. It links you to the correct event and category automatically.</div>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>JUDGE CODE</div>
-          <input className="inp" placeholder="Code from your organizer" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} style={{ letterSpacing: 2, fontFamily: "Bebas Neue,sans-serif", fontSize: 18 }} />
-        </div>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>YOUR NAME</div>
-          <input className="inp" placeholder="Your full name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && register()} />
-        </div>
-        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={register} disabled={loading}>
-          {loading ? <Spinner /> : "REGISTER AS JUDGE →"}
-        </button>
       </div>
     </div>
   );
@@ -1505,7 +1422,6 @@ function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
 // ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,      setScreen]      = useState("loading");
-  const [authUser,    setAuthUser]    = useState(null);
   const [activeEvent, setActiveEvent] = useState(null);
   const [judgeData,   setJudgeData]   = useState(null);
   const [toast,       setToast]       = useState(null);
@@ -1513,24 +1429,20 @@ export default function App() {
   const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   useEffect(() => {
+    // Just check session to decide if admin is already logged in
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthUser(session?.user ?? null);
-      setScreen("landing");
+      if (session?.user) setScreen("adminDashboard");
+      else setScreen("landing");
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setAuthUser(session?.user ?? null);
+      if (!session?.user && screen === "adminDashboard") setScreen("landing");
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleOrgLogin = (result) => {
-    if (result.type === "code") { setActiveEvent(result.event); setScreen("dashboard"); }
-    else { setAuthUser(result.user); setScreen("picker"); }
-  };
-
-  const handleLogout = async () => {
+  const handleAdminLogout = async () => {
     await supabase.auth.signOut();
-    setAuthUser(null); setActiveEvent(null); setScreen("landing");
+    setScreen("landing");
   };
 
   if (screen === "loading") return (
@@ -1545,16 +1457,13 @@ export default function App() {
     <div style={{ fontFamily: "'Bebas Neue',sans-serif", background: "#080808", minHeight: "100vh", color: "#fff" }}>
       <style>{CSS}</style>
       <Toast toast={toast} />
-      {screen === "landing"     && <LandingScreen onAdminLogin={() => setScreen("adminLogin")} onOrgLogin={() => setScreen("orgLogin")} onJudgeReg={() => setScreen("judgeReg")} onJudgeLogin={() => setScreen("judgeLogin")} />}
-      {screen === "adminLogin"  && <AdminLoginScreen onBack={() => setScreen("landing")} onSuccess={() => setScreen("create")} showToast={showToast} />}
-      {screen === "orgLogin"    && <OrgLoginScreen onBack={() => setScreen("landing")} onLogin={handleOrgLogin} showToast={showToast} />}
-      {screen === "picker"      && <EventPickerScreen onBack={() => setScreen("landing")} onSelect={(ev) => { setActiveEvent(ev); setScreen("dashboard"); }} showToast={showToast} />}
-      {screen === "create"      && <CreateEventScreen onBack={() => setScreen("landing")} onCreate={(ev) => { setActiveEvent(ev); setScreen("created"); }} showToast={showToast} />}
-      {screen === "created"     && activeEvent && <EventCreatedScreen event={activeEvent} onEnter={() => setScreen("dashboard")} />}
-      {screen === "judgeReg"    && <JudgeRegScreen onBack={() => setScreen("landing")} showToast={showToast} />}
-      {screen === "judgeLogin"  && <JudgeLoginScreen onBack={(dest) => setScreen(dest || "landing")} onLogin={({ judgeCode, event }) => { setJudgeData(judgeCode); setActiveEvent(event); setScreen("judgeDashboard"); }} showToast={showToast} />}
+      {screen === "landing"        && <LandingScreen onAdminLogin={() => setScreen("adminLogin")} onOrgLogin={() => setScreen("orgLogin")} onJudgeLogin={() => setScreen("judgeLogin")} />}
+      {screen === "adminLogin"     && <AdminLoginScreen onBack={() => setScreen("landing")} onLogin={() => setScreen("adminDashboard")} showToast={showToast} />}
+      {screen === "adminDashboard" && <AdminDashboard onBack={handleAdminLogout} showToast={showToast} />}
+      {screen === "orgLogin"       && <OrgLoginScreen onBack={() => setScreen("landing")} onLogin={(ev) => { setActiveEvent(ev); setScreen("dashboard"); }} showToast={showToast} />}
+      {screen === "judgeLogin"     && <JudgeLoginScreen onBack={() => setScreen("landing")} onLogin={({ judgeCode, event }) => { setJudgeData(judgeCode); setActiveEvent(event); setScreen("judgeDashboard"); }} showToast={showToast} />}
       {screen === "judgeDashboard" && judgeData && activeEvent && <JudgeDashboard judgeCode={judgeData} event={activeEvent} onBack={() => { setJudgeData(null); setActiveEvent(null); setScreen("landing"); }} showToast={showToast} />}
-      {screen === "dashboard"   && activeEvent && <Dashboard event={activeEvent} onBack={handleLogout} showToast={showToast} />}
+      {screen === "dashboard"      && activeEvent && <Dashboard event={activeEvent} onBack={() => { setActiveEvent(null); setScreen("landing"); }} showToast={showToast} />}
     </div>
   );
 }
