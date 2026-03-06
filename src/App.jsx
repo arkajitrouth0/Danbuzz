@@ -40,11 +40,12 @@ const rand4     = () => Math.floor(1000 + Math.random() * 9000);
 const randAlpha = (n) => Array.from({ length: n }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
 const genOrgCode = () => `ORG-${randAlpha(3)}-${rand4()}`;
 
-const genJudgeCodes = (prefix, categories) => {
+const genJudgeCodes = (prefix, categories, judgeCounts = {}) => {
   const codes = [];
   categories.forEach((cat) => {
     const slug = cat.replace(/\s+/g, "").slice(0, 3).toUpperCase();
-    for (let i = 1; i <= 3; i++) {
+    const count = Math.max(1, Math.min(10, parseInt(judgeCounts[cat]) || 3));
+    for (let i = 1; i <= count; i++) {
       codes.push({ code: `${prefix}-${slug}${rand4()}`, category: cat, slot: i });
     }
   });
@@ -113,7 +114,7 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────────
 // SCREEN: LANDING
 // ─────────────────────────────────────────────────────────────────
-function LandingScreen({ onCreateEvent, onOrgLogin, onJudgeReg }) {
+function LandingScreen({ onCreateEvent, onOrgLogin, onJudgeReg, onJudgeLogin }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", background: "#080808" }}>
       <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 64, letterSpacing: 6, lineHeight: 1 }}>DAN<span style={{ color: "#ff4d4d" }}>BUZZ</span></div>
@@ -121,7 +122,8 @@ function LandingScreen({ onCreateEvent, onOrgLogin, onJudgeReg }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 320 }}>
         <button className="btn" style={{ background: "#ff4d4d", color: "#000", fontSize: 14, padding: "15px" }} onClick={onCreateEvent}>+ CREATE NEW EVENT</button>
         <button className="btn" style={{ background: "#111", color: "#fff", border: "1px solid #2a2a2a", fontSize: 14, padding: "15px" }} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
-        <button className="btn" style={{ background: "#111", color: "#aaa", border: "1px solid #222", fontSize: 13, padding: "14px" }} onClick={onJudgeReg}>JUDGE REGISTRATION</button>
+        <button className="btn" style={{ background: "#111", color: "#aaa", border: "1px solid #222", fontSize: 13, padding: "14px" }} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
+        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", fontSize: 12, padding: "10px" }} onClick={onJudgeReg}>FIRST TIME? JUDGE REGISTRATION</button>
       </div>
       <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#1e1e1e", letterSpacing: 2, marginTop: 52 }}>CUSTOM CATEGORIES · REAL-TIME · POWERED BY SUPABASE</div>
     </div>
@@ -135,6 +137,8 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
   const [form, setForm]         = useState({ name: "", date: "", city: "" });
   const [categories, setCategories] = useState([]);
   const [customInput, setCustomInput] = useState("");
+  const [judgeCountInput, setJudgeCountInput] = useState("");
+  const [judgeCounts, setJudgeCounts] = useState({});
   const [loading, setLoading]   = useState(false);
 
   const addCategory = (cat) => {
@@ -145,7 +149,10 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
     setCustomInput("");
   };
 
-  const removeCategory = (cat) => setCategories((prev) => prev.filter((c) => c !== cat));
+  const removeCategory = (cat) => {
+    setCategories((prev) => prev.filter((c) => c !== cat));
+    setJudgeCounts((prev) => { const n = { ...prev }; delete n[cat]; return n; });
+  };
 
   const toggleSuggested = (cat) => {
     if (categories.map((c) => c.toLowerCase()).includes(cat.toLowerCase())) {
@@ -162,7 +169,7 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
 
     const orgCode = genOrgCode();
     const prefix  = randAlpha(3);
-    const judgeCodes = genJudgeCodes(prefix, categories);
+    const judgeCodes = genJudgeCodes(prefix, categories, judgeCounts);
 
     const { data: eventData, error: eventError } = await supabase
       .from("events")
@@ -233,21 +240,28 @@ function CreateEventScreen({ onBack, onCreate, showToast }) {
         {categories.length > 0 ? (
           <div style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", borderRadius: 12, padding: 16, marginBottom: 8 }}>
             <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 12 }}>
-              YOUR EVENT CATEGORIES ({categories.length})
+              YOUR EVENT CATEGORIES ({categories.length}) — Set judges per category
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {categories.map((cat, i) => {
                 const c = PALETTE[i % PALETTE.length];
+                const count = judgeCounts[cat] || 3;
                 return (
-                  <div key={cat} style={{ display: "flex", alignItems: "center", gap: 8, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: "6px 12px" }}>
-                    <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 1, color: c.primary }}>{cat}</span>
-                    <button onClick={() => removeCategory(cat)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+                  <div key={cat} style={{ display: "flex", alignItems: "center", gap: 10, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, letterSpacing: 1, color: c.primary, flex: 1 }}>{cat}</span>
+                    <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>Judges:</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button onClick={() => setJudgeCounts((prev) => ({ ...prev, [cat]: Math.max(1, (parseInt(prev[cat]) || 3) - 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>−</button>
+                      <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16, color: c.primary, minWidth: 18, textAlign: "center" }}>{count}</span>
+                      <button onClick={() => setJudgeCounts((prev) => ({ ...prev, [cat]: Math.min(10, (parseInt(prev[cat]) || 3) + 1) }))} style={{ background: "#1a1a1a", border: "1px solid #333", color: "#aaa", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontFamily: "Bebas Neue,sans-serif", fontSize: 14 }}>+</button>
+                    </div>
+                    <button onClick={() => removeCategory(cat)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 14, padding: 0, lineHeight: 1, marginLeft: 4 }}>✕</button>
                   </div>
                 );
               })}
             </div>
             <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#444", marginTop: 12 }}>
-              3 judge slots will be generated per category ({categories.length * 3} total judge codes)
+              Total judge codes: {categories.reduce((sum, cat) => sum + (parseInt(judgeCounts[cat]) || 3), 0)}
             </div>
           </div>
         ) : (
@@ -325,6 +339,265 @@ function EventCreatedScreen({ event, onEnter }) {
       <button className="btn" style={{ background: "#ff4d4d", color: "#000", fontSize: 14, padding: "13px 32px" }} onClick={onEnter}>
         ENTER DASHBOARD →
       </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SCREEN: JUDGE LOGIN
+// ─────────────────────────────────────────────────────────────────
+function JudgeLoginScreen({ onBack, onLogin, showToast }) {
+  const [code, setCode]     = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const login = async () => {
+    if (!code.trim()) return showToast("Enter your judge code!", "error");
+    setLoading(true);
+    const upper = code.trim().toUpperCase();
+    const { data: jc, error } = await supabase
+      .from("judge_codes")
+      .select("*, events(*)")
+      .eq("code", upper)
+      .single();
+    if (error || !jc) { showToast("Invalid code. Ask your organizer.", "error"); setLoading(false); return; }
+    if (!jc.used) { showToast("Code not yet registered. Use Judge Registration first.", "error"); setLoading(false); return; }
+    onLogin({ judgeCode: jc, event: jc.events });
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: "#080808" }}>
+      <div style={{ width: "100%", maxWidth: 380 }}>
+        <button className="btn" style={{ background: "transparent", color: "#555", border: "none", padding: 0, marginBottom: 24, fontSize: 12, letterSpacing: 2 }} onClick={onBack}>← BACK</button>
+        <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 26, letterSpacing: 3, marginBottom: 4 }}>JUDGE LOGIN</div>
+        <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 28 }}>Enter your judge code to access your scoring panel and view the leaderboard.</div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", letterSpacing: 2, marginBottom: 6 }}>JUDGE CODE</div>
+          <input className="inp" placeholder="Your judge code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === "Enter" && login()} style={{ letterSpacing: 2, fontFamily: "Bebas Neue,sans-serif", fontSize: 18 }} />
+        </div>
+        <button className="btn" style={{ background: "#ff4d4d", color: "#000", width: "100%", fontSize: 14, padding: "13px" }} onClick={login} disabled={loading}>
+          {loading ? <Spinner /> : "LOGIN AS JUDGE →"}
+        </button>
+        <div style={{ marginTop: 16, textAlign: "center", fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555" }}>
+          First time? <button style={{ background: "none", border: "none", color: "#ff4d4d", cursor: "pointer", fontFamily: "Barlow,sans-serif", fontSize: 11, padding: 0 }} onClick={() => onBack("judgeReg")}>Register here</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SCREEN: JUDGE DASHBOARD
+// ─────────────────────────────────────────────────────────────────
+function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
+  const categories  = event.categories || [];
+  const myCategory  = judgeCode.category;
+  const myKey       = `${myCategory}-J${judgeCode.slot}`;
+  const col         = getCatColor(categories, myCategory);
+
+  const [tab, setTab]             = useState("scoring");
+  const [scoreInputs, setScoreInputs] = useState({});
+  const [participants, setParticipants] = useState([]);
+  const [scores, setScores]             = useState([]);
+  const [judgeCodes, setJudgeCodes]     = useState([]);
+  const [loading, setLoading]           = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      const [pRes, sRes, jcRes] = await Promise.all([
+        supabase.from("participants").select("*").eq("event_id", event.id).eq("category", myCategory),
+        supabase.from("scores").select("*").eq("event_id", event.id),
+        supabase.from("judge_codes").select("*").eq("event_id", event.id).eq("category", myCategory),
+      ]);
+      if (pRes.data)  setParticipants(pRes.data);
+      if (sRes.data)  setScores(sRes.data);
+      if (jcRes.data) setJudgeCodes(jcRes.data);
+      setLoading(false);
+    };
+    load();
+  }, [event.id, myCategory]);
+
+  useEffect(() => {
+    const pCh = supabase.channel(`jp-${event.id}-${myCategory}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "participants", filter: `event_id=eq.${event.id}` },
+        (p) => { if (p.new.category === myCategory) setParticipants((prev) => [...prev, p.new]); })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "participants", filter: `event_id=eq.${event.id}` },
+        (p) => setParticipants((prev) => prev.map((x) => x.id === p.new.id ? p.new : x)))
+      .subscribe();
+    const sCh = supabase.channel(`js-${event.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "scores", filter: `event_id=eq.${event.id}` },
+        (p) => setScores((prev) => [...prev, p.new]))
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "scores", filter: `event_id=eq.${event.id}` },
+        (p) => setScores((prev) => prev.map((s) => s.id === p.new.id ? p.new : s)))
+      .subscribe();
+    return () => { supabase.removeChannel(pCh); supabase.removeChannel(sCh); };
+  }, [event.id, myCategory]);
+
+  const scoreMap = {};
+  scores.forEach((s) => {
+    if (!scoreMap[s.participant_id]) scoreMap[s.participant_id] = {};
+    scoreMap[s.participant_id][s.judge_key] = s.score;
+  });
+  const getScore    = (pid) => calcAvgScore(Object.values(scoreMap[pid] || {}));
+  const getMyScore  = (pid) => scoreMap[pid]?.[myKey];
+  const catParts    = participants.filter((p) => p.checked_in);
+  const catSorted   = [...catParts].sort((a, b) => getScore(b.id) - getScore(a.id));
+  const catJudges   = judgeCodes.filter((j) => j.used);
+
+  const submitScore = async (pid) => {
+    const val = parseFloat(scoreInputs[pid]);
+    if (isNaN(val) || val < 1 || val > 10) return showToast("Score must be 1–10", "error");
+    const { error } = await supabase.from("scores").upsert(
+      { participant_id: pid, event_id: event.id, judge_key: myKey, score: val },
+      { onConflict: "participant_id,judge_key" }
+    );
+    if (error) return showToast("Score failed: " + error.message, "error");
+    setScoreInputs((prev) => ({ ...prev, [pid]: "" }));
+    showToast("Score submitted ✓");
+  };
+
+  if (loading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#080808" }}><Spinner /></div>
+  );
+
+  return (
+    <div style={{ fontFamily: "'Bebas Neue',Impact,sans-serif", background: "#080808", minHeight: "100vh", color: "#fff" }}>
+      {/* Header */}
+      <div style={{ padding: "22px 22px 0", maxWidth: 900, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 36, letterSpacing: 4, lineHeight: 1 }}>DAN<span style={{ color: col.primary }}>BUZZ</span></div>
+            <div style={{ background: col.bg, border: `1px solid ${col.border}`, borderRadius: 8, padding: "8px 14px", marginTop: 8, display: "inline-flex", alignItems: "center", gap: 10 }}>
+              <div className="pulse" style={{ width: 7, height: 7, borderRadius: "50%", background: "#00c853" }} />
+              <div>
+                <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 15, color: col.primary }}>{judgeCode.judge_name}</div>
+                <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>Judge {judgeCode.slot} · {myCategory} · {event.name}</div>
+              </div>
+            </div>
+          </div>
+          <button className="btn" style={{ background: "transparent", color: "#555", border: "1px solid #222", fontSize: 11 }} onClick={onBack}>← LOGOUT</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", borderBottom: "1px solid #1a1a1a", overflowX: "auto" }}>
+          {[
+            { key: "scoring",     label: "MY SCORING" },
+            { key: "allscores",   label: "ALL SCORES" },
+            { key: "leaderboard", label: "LEADERBOARD" },
+          ].map((t) => (
+            <button key={t.key} className="tbtn" style={{ color: tab === t.key ? col.primary : "#555", borderBottom: tab === t.key ? `3px solid ${col.primary}` : "3px solid transparent" }} onClick={() => setTab(t.key)}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 22px 40px", maxWidth: 900, margin: "0 auto" }}>
+        {/* MY SCORING */}
+        {tab === "scoring" && (
+          <div className="slide">
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 3, color: col.primary, marginBottom: 4 }}>MY SCORES · {myCategory}</div>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 18 }}>Scoring as <span style={{ color: col.primary }}>{judgeCode.judge_name}</span>. Enter a score 1–10 and submit for each dancer.</div>
+            {catParts.length === 0 && <div style={{ textAlign: "center", padding: "48px", fontFamily: "Barlow,sans-serif", color: "#333" }}>No checked-in participants yet</div>}
+            {catParts.map((p) => {
+              const myScore = getMyScore(p.id);
+              return (
+                <div key={p.id} className="card" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", border: myScore !== undefined ? `1px solid ${col.border}` : "1px solid #1e1e1e" }}>
+                  <div style={{ flex: 1, minWidth: 110 }}>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16 }}>{p.name}</div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>{p.city}</div>
+                  </div>
+                  {myScore !== undefined && (
+                    <span className="badge" style={{ background: col.bg, color: col.primary, border: `1px solid ${col.border}` }}>MY SCORE: {myScore}</span>
+                  )}
+                  <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                    <input className="inp" type="number" min="1" max="10" step="0.5" placeholder="1–10" value={scoreInputs[p.id] || ""} onChange={(e) => setScoreInputs((prev) => ({ ...prev, [p.id]: e.target.value }))} style={{ width: 72 }} />
+                    <button className="btn" style={{ background: col.primary, color: "#000", fontSize: 11 }} onClick={() => submitScore(p.id)}>{myScore !== undefined ? "UPDATE" : "SUBMIT"}</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ALL SCORES */}
+        {tab === "allscores" && (
+          <div className="slide">
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 3, color: col.primary, marginBottom: 4 }}>ALL SCORES · {myCategory}</div>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 18 }}>Scores from all judges in your category. Updates in real-time.</div>
+            {catParts.length === 0 && <div style={{ textAlign: "center", padding: "48px", fontFamily: "Barlow,sans-serif", color: "#333" }}>No checked-in participants yet</div>}
+            {catParts.map((p) => {
+              const sm = scoreMap[p.id] || {};
+              return (
+                <div key={p.id} className="card" style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+                    <div>
+                      <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 16 }}>{p.name}</div>
+                      <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>{p.city}</div>
+                    </div>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 28, color: col.primary }}>{getScore(p.id) || "—"}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                    {catJudges.map((j) => {
+                      const key   = `${j.category}-J${j.slot}`;
+                      const isMe  = key === myKey;
+                      return (
+                        <div key={key} style={{ background: isMe ? col.bg : "#1a1a1a", border: `1px solid ${isMe ? col.border : "#2a2a2a"}`, borderRadius: 6, padding: "5px 9px", textAlign: "center", minWidth: 64 }}>
+                          <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 8, color: isMe ? col.primary : "#555", marginBottom: 1 }}>{j.judge_name}{isMe ? " (YOU)" : ""}</div>
+                          <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 20, color: isMe ? col.primary : "#fff" }}>{sm[key] ?? "—"}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* LEADERBOARD */}
+        {tab === "leaderboard" && (
+          <div className="slide">
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 3, color: col.primary, marginBottom: 4 }}>LEADERBOARD · {myCategory}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+              <div className="pulse" style={{ width: 7, height: 7, borderRadius: "50%", background: col.primary }} />
+              <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 9, color: "#555", letterSpacing: 2 }}>REAL-TIME · {catParts.length} DANCERS</span>
+            </div>
+            {catSorted.length >= 2 && (
+              <div style={{ display: "flex", gap: 10, marginBottom: 22, flexWrap: "wrap" }}>
+                {[{ p: catSorted[1], rank: 2, pt: 55 }, { p: catSorted[0], rank: 1, pt: 85 }, { p: catSorted[2], rank: 3, pt: 38 }].map(({ p, rank, pt }) => p && (
+                  <div key={p.id} style={{ flex: 1, minWidth: 120, background: rank === 1 ? col.bg : "#0d0d0d", border: `1px solid ${rank === 1 ? col.border : "#1a1a1a"}`, borderRadius: 12, padding: "14px", paddingTop: pt + "px", textAlign: "center" }}>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 38, color: rank === 1 ? col.primary : rank === 2 ? "#aaa" : "#cd7f32", lineHeight: 1 }}>#{rank}</div>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 17, marginBottom: 2 }}>{p.name}</div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555", marginBottom: 6 }}>{p.city}</div>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 36, color: rank === 1 ? col.primary : "#fff" }}>{getScore(p.id)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ background: "#0c0c0c", border: "1px solid #161616", borderRadius: 12, overflow: "hidden" }}>
+              {catSorted.map((p, i) => (
+                <div key={p.id} className="lrow">
+                  <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 20, color: i < 3 ? col.primary : "#222", minWidth: 36 }}>#{i + 1}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 15 }}>{p.name}</div>
+                    <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#555" }}>{p.city}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 7, alignItems: "center", minWidth: 120 }}>
+                    <div style={{ background: "#1a1a1a", borderRadius: 3, height: 4, flex: 1, overflow: "hidden" }}>
+                      <div style={{ height: "100%", borderRadius: 3, background: col.primary, width: `${getScore(p.id)}%`, transition: "width .6s" }} />
+                    </div>
+                    <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, color: i < 3 ? col.primary : "#fff", minWidth: 32, textAlign: "right" }}>{getScore(p.id) || "—"}</div>
+                  </div>
+                  {scoreMap[p.id]?.[myKey] !== undefined && (
+                    <span className="badge" style={{ background: col.bg, color: col.primary, border: `1px solid ${col.border}`, fontSize: 9 }}>MY: {scoreMap[p.id][myKey]}</span>
+                  )}
+                </div>
+              ))}
+              {catSorted.length === 0 && <div style={{ padding: "40px", textAlign: "center", fontFamily: "Barlow,sans-serif", color: "#333" }}>No scores yet</div>}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -674,6 +947,34 @@ function Dashboard({ event, onBack, showToast }) {
     onBack();
   };
 
+  // Export CSV
+  const exportCSV = () => {
+    const rows = [];
+    rows.push(["Category","Participant","City","Checked In","Round",...judgeCodes.filter((j) => j.used).map((j) => `${j.category}-J${j.slot} (${j.judge_name})`), "Avg Score"]);
+    participants.forEach((p) => {
+      const catJudgesForP = judgeCodes.filter((j) => j.used && j.category === p.category);
+      const sm = scoreMap[p.id] || {};
+      const judgeScores = catJudgesForP.map((j) => {
+        const key = `${j.category}-J${j.slot}`;
+        return sm[key] !== undefined ? sm[key] : "";
+      });
+      // Pad for judges not in this category
+      const allUsed = judgeCodes.filter((j) => j.used);
+      const allScores = allUsed.map((j) => {
+        const key = `${j.category}-J${j.slot}`;
+        return j.category === p.category ? (sm[key] !== undefined ? sm[key] : "") : "";
+      });
+      rows.push([p.category, p.name, p.city, p.checked_in ? "Yes" : "No", currentRound, ...allScores, getScore(p.id) || ""]);
+    });
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `${event.name.replace(/\s+/g,"-")}-export.csv`; a.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV exported ✓");
+  };
+
   const top8 = catSorted.slice(0, 8);
   const bracketRounds = [
     { name: "Top 8",  matches: [[top8[0], top8[7]], [top8[1], top8[6]], [top8[2], top8[5]], [top8[3], top8[4]]] },
@@ -819,6 +1120,7 @@ function Dashboard({ event, onBack, showToast }) {
             { key: "bracket",     label: "BRACKET" },
             { key: "leaderboard", label: "LEADERBOARD" },
             { key: "bias",        label: `BIAS${biasAlerts.length > 0 ? ` (${biasAlerts.length})` : ""}` },
+            { key: "export",      label: "EXPORT" },
           ].map((t) => (
             <button key={t.key} className="tbtn" style={{ color: tab === t.key ? col.primary : "#555", borderBottom: tab === t.key ? `3px solid ${col.primary}` : "3px solid transparent" }} onClick={() => setTab(t.key)}>{t.label}</button>
           ))}
@@ -1037,13 +1339,82 @@ function Dashboard({ event, onBack, showToast }) {
             ))}
           </div>
         )}
+
+        {/* EXPORT */}
+        {tab === "export" && (
+          <div className="slide">
+            <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 18, letterSpacing: 3, color: col.primary, marginBottom: 4 }}>EXPORT EVENT DATA</div>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 12, color: "#555", marginBottom: 24 }}>Download all event data as a CSV — includes all participants, check-in status, individual judge scores, and averages across all categories.</div>
+
+            {/* Summary stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10, marginBottom: 24 }}>
+              {[
+                { label: "TOTAL PARTICIPANTS", val: participants.length, color: "#fff" },
+                { label: "CHECKED IN",         val: participants.filter((p) => p.checked_in).length, color: "#00c853" },
+                { label: "CATEGORIES",         val: categories.length, color: col.primary },
+                { label: "JUDGES",             val: regJudges.length, color: "#ffd700" },
+                { label: "SCORES RECORDED",    val: scores.length, color: "#00e5ff" },
+              ].map((s) => (
+                <div key={s.label} style={{ background: "#0f0f0f", border: "1px solid #181818", borderRadius: 10, padding: "14px 16px", textAlign: "center" }}>
+                  <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 32, color: s.color, lineHeight: 1 }}>{s.val}</div>
+                  <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 8, color: "#444", letterSpacing: 2, marginTop: 4 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-category breakdown */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 13, letterSpacing: 3, color: "#444", marginBottom: 12 }}>PER CATEGORY BREAKDOWN</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {categories.map((cat) => {
+                  const c         = getCatColor(categories, cat);
+                  const catP      = participants.filter((p) => p.category === cat);
+                  const checkedIn = catP.filter((p) => p.checked_in).length;
+                  const catJ      = judgeCodes.filter((j) => j.category === cat && j.used);
+                  const catScores = scores.filter((s) => catP.some((p) => p.id === s.participant_id));
+                  return (
+                    <div key={cat} style={{ display: "flex", alignItems: "center", gap: 14, background: "#0d0d0d", border: `1px solid ${c.border}`, borderRadius: 9, padding: "12px 16px", flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: "Bebas Neue,sans-serif", fontSize: 14, color: c.primary, letterSpacing: 1, minWidth: 120 }}>{cat}</span>
+                      <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#555" }}>{catP.length} participants</span>
+                      <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#00c853" }}>{checkedIn} checked in</span>
+                      <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#ffd700" }}>{catJ.length} judges</span>
+                      <span style={{ fontFamily: "Barlow,sans-serif", fontSize: 11, color: "#00e5ff" }}>{catScores.length} scores</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Export buttons */}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <button className="btn" style={{ background: "#00c853", color: "#000", fontSize: 13, padding: "13px 28px" }} onClick={exportCSV}>
+                ⬇ EXPORT ALL DATA (CSV)
+              </button>
+              <button className="btn" style={{ background: "#111", color: "#555", border: "1px solid #2a2a2a", fontSize: 11 }} onClick={() => {
+                const checkins = participants.filter((p) => p.checked_in);
+                const rows = [["Category","Name","City","Checked In"],...checkins.map((p) => [p.category, p.name, p.city, "Yes"])];
+                const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob); const a = document.createElement("a");
+                a.href = url; a.download = `${event.name.replace(/\s+/g,"-")}-checkins.csv`; a.click();
+                URL.revokeObjectURL(url); showToast("Check-in list exported ✓");
+              }}>⬇ CHECK-INS ONLY</button>
+              <button className="btn" style={{ background: "#111", color: "#555", border: "1px solid #2a2a2a", fontSize: 11 }} onClick={() => {
+                const rows = [["Category","Judge","Slot","Code","Registered"],...judgeCodes.map((j) => [j.category, j.judge_name || "", j.slot, j.code, j.used ? "Yes" : "No"])];
+                const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob); const a = document.createElement("a");
+                a.href = url; a.download = `${event.name.replace(/\s+/g,"-")}-judges.csv`; a.click();
+                URL.revokeObjectURL(url); showToast("Judge list exported ✓");
+              }}>⬇ JUDGES LIST</button>
+            </div>
+            <div style={{ fontFamily: "Barlow,sans-serif", fontSize: 10, color: "#333", marginTop: 14 }}>CSV opens in Excel, Google Sheets, or any spreadsheet app.</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────
-// ORGANIZER TAB
 // ─────────────────────────────────────────────────────────────────
 function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
   const [form, setForm]       = useState({ name: "", city: "" });
@@ -1082,6 +1453,7 @@ export default function App() {
   const [screen,      setScreen]      = useState("loading");
   const [authUser,    setAuthUser]    = useState(null);
   const [activeEvent, setActiveEvent] = useState(null);
+  const [judgeData,   setJudgeData]   = useState(null);
   const [toast,       setToast]       = useState(null);
 
   const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
@@ -1119,13 +1491,15 @@ export default function App() {
     <div style={{ fontFamily: "'Bebas Neue',sans-serif", background: "#080808", minHeight: "100vh", color: "#fff" }}>
       <style>{CSS}</style>
       <Toast toast={toast} />
-      {screen === "landing"   && <LandingScreen onCreateEvent={() => setScreen("create")} onOrgLogin={() => setScreen("orgLogin")} onJudgeReg={() => setScreen("judgeReg")} />}
-      {screen === "orgLogin"  && <OrgLoginScreen onBack={() => setScreen("landing")} onLogin={handleOrgLogin} showToast={showToast} />}
-      {screen === "picker"    && <EventPickerScreen onBack={() => setScreen("landing")} onSelect={(ev) => { setActiveEvent(ev); setScreen("dashboard"); }} showToast={showToast} />}
-      {screen === "create"    && <CreateEventScreen onBack={() => setScreen("landing")} onCreate={(ev) => { setActiveEvent(ev); setScreen("created"); }} showToast={showToast} />}
-      {screen === "created"   && activeEvent && <EventCreatedScreen event={activeEvent} onEnter={() => setScreen("dashboard")} />}
-      {screen === "judgeReg"  && <JudgeRegScreen onBack={() => setScreen("landing")} showToast={showToast} />}
-      {screen === "dashboard" && activeEvent && <Dashboard event={activeEvent} onBack={handleLogout} showToast={showToast} />}
+      {screen === "landing"     && <LandingScreen onCreateEvent={() => setScreen("create")} onOrgLogin={() => setScreen("orgLogin")} onJudgeReg={() => setScreen("judgeReg")} onJudgeLogin={() => setScreen("judgeLogin")} />}
+      {screen === "orgLogin"    && <OrgLoginScreen onBack={() => setScreen("landing")} onLogin={handleOrgLogin} showToast={showToast} />}
+      {screen === "picker"      && <EventPickerScreen onBack={() => setScreen("landing")} onSelect={(ev) => { setActiveEvent(ev); setScreen("dashboard"); }} showToast={showToast} />}
+      {screen === "create"      && <CreateEventScreen onBack={() => setScreen("landing")} onCreate={(ev) => { setActiveEvent(ev); setScreen("created"); }} showToast={showToast} />}
+      {screen === "created"     && activeEvent && <EventCreatedScreen event={activeEvent} onEnter={() => setScreen("dashboard")} />}
+      {screen === "judgeReg"    && <JudgeRegScreen onBack={() => setScreen("landing")} showToast={showToast} />}
+      {screen === "judgeLogin"  && <JudgeLoginScreen onBack={(dest) => setScreen(dest || "landing")} onLogin={({ judgeCode, event }) => { setJudgeData(judgeCode); setActiveEvent(event); setScreen("judgeDashboard"); }} showToast={showToast} />}
+      {screen === "judgeDashboard" && judgeData && activeEvent && <JudgeDashboard judgeCode={judgeData} event={activeEvent} onBack={() => { setJudgeData(null); setActiveEvent(null); setScreen("landing"); }} showToast={showToast} />}
+      {screen === "dashboard"   && activeEvent && <Dashboard event={activeEvent} onBack={handleLogout} showToast={showToast} />}
     </div>
   );
 }
