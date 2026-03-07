@@ -640,7 +640,8 @@ function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
   const handleRegister=async()=>{
     if(!name.trim()||!city.trim()||!phone.trim())return showToast("Fill in name, city and phone!","error");
     setLoading(true);
-    const{error}=await supabase.from("attendees").insert({event_id:event.id,name:name.trim(),city:city.trim(),phone:phone.trim(),role:"attendee",category:null});
+    let{error}=await supabase.from("attendees").insert({event_id:event.id,name:name.trim(),city:city.trim(),phone:phone.trim(),role:"attendee",category:null});
+    if(error&&error.message&&error.message.toLowerCase().includes("category"))({error}=await supabase.from("attendees").insert({event_id:event.id,name:name.trim(),city:city.trim(),phone:phone.trim(),role:"attendee"}));
     if(error){showToast("Registration failed: "+error.message,"error");setLoading(false);return;}
     showToast("Registered! Loading live view...");
     onLogin({event,name:name.trim(),role:"attendee"});setLoading(false);
@@ -1166,7 +1167,8 @@ function AttendeeTab({ event, col, showToast }) {
   const submit=async()=>{
     if(!form.name.trim()||!form.city.trim()||!form.phone.trim())return showToast("Fill name, city and phone!","error");
     setLoading(true);
-    const{error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee",category:null});
+    let{error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee",category:null});
+    if(error&&error.message&&error.message.toLowerCase().includes("category"))({error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee"}));
     if(error){showToast("Failed: "+error.message,"error");setLoading(false);return;}
     showToast(`${form.name} registered as Viewer ✓`);
     setForm({name:"",city:"",phone:""});setLoading(false);load();
@@ -2318,7 +2320,12 @@ function Dashboard({ event, onBack, showToast }) {
 
   const addParticipant=useCallback(async(form)=>{
     if(!form.name.trim()||!form.city.trim())return showToast("Fill name and city!","error");
-    const{error}=await supabase.from("participants").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone?.trim()||null,category:activeCat,payment_method:form.payment_method||"cash"});
+    const payload={event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone?.trim()||null,category:activeCat,payment_method:form.payment_method||"cash"};
+    let{error}=await supabase.from("participants").insert(payload);
+    if(error&&error.message&&error.message.toLowerCase().includes("payment_method")){
+      const{payment_method:_,...fallback}=payload;
+      ({error}=await supabase.from("participants").insert(fallback));
+    }
     if(error)return showToast("Failed: "+error.message,"error");
     showToast(`${form.name} added to ${activeCat}!`);
   },[activeCat,event.id,showToast]);
