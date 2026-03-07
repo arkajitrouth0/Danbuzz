@@ -1109,9 +1109,9 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 // ORGANIZER: Add Participant tab
 // ─────────────────────────────────────────────────────────────────
 function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
-  const [form,setForm]=useState({name:"",city:"",phone:""});
+  const [form,setForm]=useState({name:"",city:"",phone:"",payment_method:"cash"});
   const [loading,setLoading]=useState(false);
-  const submit=async()=>{setLoading(true);await onAdd({...form,category:activeCat});setForm({name:"",city:"",phone:""});setLoading(false);};
+  const submit=async()=>{setLoading(true);await onAdd({...form,category:activeCat});setForm({name:"",city:"",phone:"",payment_method:"cash"});setLoading(false);};
   return (
     <div className="slide">
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:12}}>ADD PARTICIPANT · {activeCat}</div>
@@ -1124,6 +1124,18 @@ function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
         ))}
         <button className="btn" style={{background:col.primary,color:"#000"}} onClick={submit} disabled={loading}>{loading?<Spinner/>:"+ ADD"}</button>
       </div>
+      <div className="card" style={{marginBottom:12,padding:"12px 18px"}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",letterSpacing:2,marginBottom:8}}>PAYMENT METHOD</div>
+        <div style={{display:"flex",gap:14}}>
+          {[["cash","💵 Cash"],["online","📲 Online"]].map(([val,label])=>(
+            <label key={val} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontFamily:"Barlow,sans-serif",fontSize:12,color:form.payment_method===val?col.primary:"#666",transition:"color .15s"}}>
+              <input type="radio" name="payment_method" value={val} checked={form.payment_method===val} onChange={()=>setForm(f=>({...f,payment_method:val}))}
+                style={{accentColor:col.primary,width:15,height:15,cursor:"pointer"}}/>
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444",letterSpacing:2,marginBottom:10}}>{catSorted.length} PARTICIPANTS</div>
       {catSorted.map((p,i)=>(
         <div key={p.id} className="lrow" style={{borderRadius:10,marginBottom:5,background:"#0c0c0c",border:"1px solid #161616"}}>
@@ -1132,6 +1144,7 @@ function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}{p.phone?` · ${p.phone}`:""}</div>
           </div>
+          <span className="badge" style={{background:p.payment_method==="online"?"#00e5ff22":"#ffd70022",color:p.payment_method==="online"?"#00e5ff":"#ffd700",border:`1px solid ${p.payment_method==="online"?"#00e5ff44":"#ffd70044"}`,marginRight:4}}>{p.payment_method==="online"?"📲 ONLINE":"💵 CASH"}</span>
           <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d"}}>{p.checked_in?"✓ IN":"PENDING"}</span>
           <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:col.primary,minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
         </div>
@@ -1283,6 +1296,116 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
 }
 
 // ─────────────────────────────────────────────────────────────────
+// WINNER DASHBOARD — shown after Finals are decided
+// Displayed in Attendee, Emcee, and Host views
+// ─────────────────────────────────────────────────────────────────
+function WinnerDashboard({ event, categories, participants, battles, allRounds }) {
+  const knockoutRounds = (allRounds||[]).filter(r=>r!=="Prelims");
+  const finalsRound = knockoutRounds[knockoutRounds.length-1];
+  if (!finalsRound) return null;
+
+  // For each category, find if finals are decided
+  const results = categories.map(cat => {
+    const catBattles = battles.filter(b=>b.category===cat);
+    const scoreMap = {};
+    // build a simple participantMap from participants
+    const pMap = {};
+    participants.filter(p=>p.category===cat).forEach(p=>{pMap[p.id]=p;});
+
+    const finalsDecs = catBattles.filter(b=>b.round===finalsRound);
+    if (!finalsDecs.length) return null;
+    const matchIndices = [...new Set(finalsDecs.map(d=>d.match_index))];
+    const matchIndex = matchIndices[0]; // finals should be 1 battle
+    const decs = finalsDecs.filter(d=>d.match_index===matchIndex);
+    const result = resolveBattle(decs);
+    if (result.status !== "decided") return null;
+
+    const champ = pMap[result.winner_id];
+    // runner-up is the other finalist
+    const p1Id = decs[0]?.p1_id;
+    const p2Id = decs[0]?.p2_id;
+    const runnerUpId = p1Id===result.winner_id ? p2Id : p1Id;
+    const runnerUp = pMap[runnerUpId];
+    if (!champ) return null;
+    return { cat, champ, runnerUp };
+  }).filter(Boolean);
+
+  if (!results.length) return null;
+
+  const col = (cat) => getCatColor(categories, cat);
+
+  return (
+    <div style={{padding:"0 22px 40px",maxWidth:900,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:24,marginTop:8}}>
+        <div style={{flex:1,height:1,background:"linear-gradient(to right,transparent,#ffd70044)"}}/>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:6,color:"#ffd700"}}>🏆 FINAL RESULTS</div>
+        <div style={{flex:1,height:1,background:"linear-gradient(to left,transparent,#ffd70044)"}}/>
+      </div>
+      {results.map(({cat,champ,runnerUp})=>{
+        const c = col(cat);
+        return (
+          <div key={cat} style={{marginBottom:32}}>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:4,color:c.primary,textAlign:"center",marginBottom:14}}>{cat}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+              {/* Champion Card */}
+              <div style={{
+                background:`linear-gradient(160deg,#1c1400,#0e0a00)`,
+                border:`2px solid ${c.primary}`,
+                borderRadius:18,
+                padding:"32px 20px 24px",
+                textAlign:"center",
+                position:"relative",
+                boxShadow:`0 0 32px ${c.primary}22`,
+              }}>
+                <div style={{position:"absolute",top:-1,left:"50%",transform:"translateX(-50%)"}}>
+                  <span style={{
+                    fontFamily:"Barlow,sans-serif",fontSize:9,letterSpacing:3,
+                    color:"#000",background:c.primary,
+                    padding:"3px 16px",borderRadius:"0 0 10px 10px",
+                    fontWeight:700,
+                  }}>CHAMPION</span>
+                </div>
+                <div style={{fontSize:44,marginBottom:8,marginTop:8}}>🏆</div>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:38,color:c.primary,lineHeight:1,marginBottom:6,letterSpacing:1}}>{champ.name}</div>
+                <div style={{width:40,height:2,background:c.primary,margin:"0 auto 12px",borderRadius:2,opacity:.5}}/>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888",marginBottom:4,letterSpacing:1}}>{cat}</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{event.name}</div>
+              </div>
+              {/* Runner-Up Card */}
+              {runnerUp ? (
+                <div style={{
+                  background:"linear-gradient(160deg,#141414,#0a0a0a)",
+                  border:"2px solid #aaa",
+                  borderRadius:18,
+                  padding:"32px 20px 24px",
+                  textAlign:"center",
+                  position:"relative",
+                  boxShadow:"0 0 20px #aaaaaa18",
+                }}>
+                  <div style={{position:"absolute",top:-1,left:"50%",transform:"translateX(-50%)"}}>
+                    <span style={{
+                      fontFamily:"Barlow,sans-serif",fontSize:9,letterSpacing:3,
+                      color:"#000",background:"#bbb",
+                      padding:"3px 16px",borderRadius:"0 0 10px 10px",
+                      fontWeight:700,
+                    }}>RUNNER-UP</span>
+                  </div>
+                  <div style={{fontSize:44,marginBottom:8,marginTop:8}}>🥈</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:38,color:"#ccc",lineHeight:1,marginBottom:6,letterSpacing:1}}>{runnerUp.name}</div>
+                  <div style={{width:40,height:2,background:"#888",margin:"0 auto 12px",borderRadius:2,opacity:.5}}/>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888",marginBottom:4,letterSpacing:1}}>{cat}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{event.name}</div>
+                </div>
+              ):<div/>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // ATTENDEE DASHBOARD
 // ─────────────────────────────────────────────────────────────────
 function AttendeeDashboard({ event, attendeeName, onBack }) {
@@ -1368,49 +1491,65 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
       </div>
 
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:16}}>{currentRound} · {activeCat}</div>
-
-        {!currentRound?(
-          <div style={{textAlign:"center",padding:"48px",background:"#0d0d0d",border:"1px solid #1a1a1a",borderRadius:12}}>
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#333",letterSpacing:2,marginBottom:8}}>KNOCKOUT ROUNDS NOT STARTED</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#333"}}>Prelims are in progress. Knockout battles will appear here once the host starts the bracket.</div>
-          </div>
-        ):(
-          // Knockout: show battles with results
-          <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            {currentBattles.map(battle=>{
-              const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
-              const is3way=!!battle.p3;
-              const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
-              const result=resolveBattle(decs);
-              const isDecided=result.status==="decided";
-              const isTied=result.status==="tied";
-              return (
-                <div key={battle.match_index} className="battle-card">
-                  <div style={{padding:"8px 18px",background:"#0a0a0a",fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a"}}>
-                    BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}
-                    {isDecided&&<span style={{color:"#00c853",marginLeft:12}}>✓ DECIDED</span>}
-                    {isTied&&<span style={{color:"#ffd700",marginLeft:12}}>🤝 TIE — EXTRA BATTLE × {result.tie_round+1}</span>}
-                  </div>
-                  {fighters.map((p,fi)=>{
-                    const isWinner=isDecided&&result.winner_id===p.id;
-                    const isLoser=isDecided&&result.winner_id!==p.id;
+        {/* Check if finals are decided across any category — show winner dashboard */}
+        {(()=>{
+          const knockoutRounds=(allRounds||[]).filter(r=>r!=="Prelims");
+          const finalsRound=knockoutRounds[knockoutRounds.length-1];
+          const finalsDecided=finalsRound&&categories.some(cat=>{
+            const decs=battles.filter(b=>b.category===cat&&b.round===finalsRound);
+            if(!decs.length)return false;
+            const mi=[...new Set(decs.map(d=>d.match_index))][0];
+            return resolveBattle(decs.filter(d=>d.match_index===mi)).status==="decided";
+          });
+          if(finalsDecided){
+            return <WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={allRounds}/>;
+          }
+          return (
+            <>
+              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:16}}>{currentRound} · {activeCat}</div>
+              {!currentRound?(
+                <div style={{textAlign:"center",padding:"48px",background:"#0d0d0d",border:"1px solid #1a1a1a",borderRadius:12}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#333",letterSpacing:2,marginBottom:8}}>KNOCKOUT ROUNDS NOT STARTED</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#333"}}>Prelims are in progress. Knockout battles will appear here once the host starts the bracket.</div>
+                </div>
+              ):(
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  {currentBattles.map(battle=>{
+                    const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                    const is3way=!!battle.p3;
+                    const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
+                    const result=resolveBattle(decs);
+                    const isDecided=result.status==="decided";
+                    const isTied=result.status==="tied";
                     return (
-                      <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",background:isWinner?"#0a1e0a":isLoser?"#1a0a0a":"#0f0f0f",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
-                        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:"#444",minWidth:24}}>#{fi+1}</div>
-                        <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div></div>
-                        {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:col.primary,letterSpacing:2}}>🏆 WINNER → ADVANCES</span>}
+                      <div key={battle.match_index} className="battle-card">
+                        <div style={{padding:"8px 18px",background:"#0a0a0a",fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a"}}>
+                          BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}
+                          {isDecided&&<span style={{color:"#00c853",marginLeft:12}}>✓ DECIDED</span>}
+                          {isTied&&<span style={{color:"#ffd700",marginLeft:12}}>🤝 TIE — EXTRA BATTLE × {result.tie_round+1}</span>}
+                        </div>
+                        {fighters.map((p,fi)=>{
+                          const isWinner=isDecided&&result.winner_id===p.id;
+                          const isLoser=isDecided&&result.winner_id!==p.id;
+                          return (
+                            <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",background:isWinner?"#0a1e0a":isLoser?"#1a0a0a":"#0f0f0f",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:"#444",minWidth:24}}>#{fi+1}</div>
+                              <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div></div>
+                              {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:col.primary,letterSpacing:2}}>🏆 WINNER → ADVANCES</span>}
+                            </div>
+                          );
+                        })}
+                        {result.status==="pending"&&<div style={{padding:"8px 18px",background:"#080808",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444"}}>Judges deciding…</div>}
+                        {isTied&&<div style={{padding:"8px 18px",background:"#1a1500",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ffd700"}}>🔄 Same dancers battle again — tie ×{result.tie_round+1}</div>}
                       </div>
                     );
                   })}
-                  {result.status==="pending"&&<div style={{padding:"8px 18px",background:"#080808",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444"}}>Judges deciding…</div>}
-                  {isTied&&<div style={{padding:"8px 18px",background:"#1a1500",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ffd700"}}>🔄 Same dancers battle again — tie ×{result.tie_round+1}</div>}
+                  {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to begin…</div>}
                 </div>
-              );
-            })}
-            {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to begin…</div>}
-          </div>
-        )}
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1555,80 +1694,91 @@ function EmceeDashboard({ event, emceeName, onBack }) {
       </div>
 
       <div style={{padding:"0 22px 40px",maxWidth:1000,margin:"0 auto"}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,color:col.primary,marginBottom:14}}>{currentRound} · {activeCat}</div>
-
-        {isPrelim?(
-          /* ── PRELIMS: full ranked list with scores ── */
-          <div>
-            <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
-              🎤 Prelims in progress — dancers are performing and being scored by judges.
-            </div>
-            <div style={{background:"#0c0c0c",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
-              {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#333"}}>No scored dancers yet</div>}
-              {prelimRanked.map((p,i)=>(
-                <div key={p.id} className="lrow" style={{background:i===0?"#0a1200":i===1?"#0a1000":i===2?"#0a0e00":"transparent"}}>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#222",minWidth:36}}>#{i+1}</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div>
+        {(()=>{
+          const knockoutRounds2=rounds.filter(r=>r!=="Prelims");
+          const finalsRound2=knockoutRounds2[knockoutRounds2.length-1];
+          const finalsDecided2=finalsRound2&&categories.some(cat=>{
+            const decs=battles.filter(b=>b.category===cat&&b.round===finalsRound2);
+            if(!decs.length)return false;
+            const mi=[...new Set(decs.map(d=>d.match_index))][0];
+            return resolveBattle(decs.filter(d=>d.match_index===mi)).status==="decided";
+          });
+          if(finalsDecided2){
+            return <WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={rounds}/>;
+          }
+          return (
+            <>
+              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,color:col.primary,marginBottom:14}}>{currentRound} · {activeCat}</div>
+              {isPrelim?(
+                <div>
+                  <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
+                    🎤 Prelims in progress — dancers are performing and being scored by judges.
                   </div>
-                  <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d",marginRight:8}}>{p.checked_in?"✓ IN":"PENDING"}</span>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginRight:6}}>SCORE</div>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#fff",minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ):(
-          /* ── KNOCKOUT: battles with live results ── */
-          <div>
-            <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
-              🎤 {currentRound} battles — announce each battle as judges decide the winner.
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to be seeded…</div>}
-              {currentBattles.map((battle,bi)=>{
-                const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
-                const is3way=!!battle.p3;
-                const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
-                const result=resolveBattle(decs);
-                const isDecided=result.status==="decided";
-                const isTied=result.status==="tied";
-                return (
-                  <div key={battle.match_index} className="battle-card">
-                    <div style={{padding:"10px 18px",background:"#0a0a0a",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span>BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}</span>
-                      <div style={{display:"flex",gap:8}}>
-                        {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
-                        {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>🤝 TIE × {result.tie_round+1} — EXTRA BATTLE</span>}
-                        {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555"}}>Judges deciding…</span>}
+                  <div style={{background:"#0c0c0c",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
+                    {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#333"}}>No scored dancers yet</div>}
+                    {prelimRanked.map((p,i)=>(
+                      <div key={p.id} className="lrow" style={{background:i===0?"#0a1200":i===1?"#0a1000":i===2?"#0a0e00":"transparent"}}>
+                        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#222",minWidth:36}}>#{i+1}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
+                          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div>
+                        </div>
+                        <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d",marginRight:8}}>{p.checked_in?"✓ IN":"PENDING"}</span>
+                        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginRight:6}}>SCORE</div>
+                        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#fff",minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
                       </div>
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
-                      {fighters.map((p,fi)=>{
-                        const isWinner=isDecided&&result.winner_id===p.id;
-                        const isLoser=isDecided&&result.winner_id!==p.id;
-                        return (
-                          <div key={p.id} style={{padding:"16px 18px",textAlign:"center",
-                            background:isWinner?"#0a1e0a":isLoser?"#1a0a0a":"#0f0f0f",
-                            opacity:isLoser?0.45:1,
-                            borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
-                            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:"#444",letterSpacing:2,marginBottom:4}}>SEED #{battle.match_index*fighters.length+fi+1}</div>
-                            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
-                            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginTop:3}}>{p.city}</div>
-                            {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,marginTop:6,letterSpacing:1}}>🏆 WINNER</div>}
-                          </div>
-                        );
-                      })}
-                      {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#222"}}>VS</div>}
-                    </div>
-                    {isTied&&<div style={{padding:"8px 18px",background:"#1a1500",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",borderTop:"1px solid #2a2000"}}>🔄 Tie — same dancers battle again</div>}
+                    ))}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+                </div>
+              ):(
+                <div>
+                  <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
+                    🎤 {currentRound} battles — announce each battle as judges decide the winner.
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                    {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to be seeded…</div>}
+                    {currentBattles.map((battle,bi)=>{
+                      const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                      const is3way=!!battle.p3;
+                      const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
+                      const result=resolveBattle(decs);
+                      const isDecided=result.status==="decided";
+                      const isTied=result.status==="tied";
+                      return (
+                        <div key={battle.match_index} className="battle-card">
+                          <div style={{padding:"10px 18px",background:"#0a0a0a",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span>BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}</span>
+                            <div style={{display:"flex",gap:8}}>
+                              {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
+                              {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>🤝 TIE × {result.tie_round+1} — EXTRA BATTLE</span>}
+                              {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555"}}>Judges deciding…</span>}
+                            </div>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
+                            {fighters.map((p,fi)=>{
+                              const isWinner=isDecided&&result.winner_id===p.id;
+                              const isLoser=isDecided&&result.winner_id!==p.id;
+                              return (
+                                <div key={p.id} style={{padding:"16px 18px",textAlign:"center",background:isWinner?"#0a1e0a":isLoser?"#1a0a0a":"#0f0f0f",opacity:isLoser?0.45:1,borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
+                                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:"#444",letterSpacing:2,marginBottom:4}}>SEED #{battle.match_index*fighters.length+fi+1}</div>
+                                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
+                                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginTop:3}}>{p.city}</div>
+                                  {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,marginTop:6,letterSpacing:1}}>🏆 WINNER</div>}
+                                </div>
+                              );
+                            })}
+                            {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#222"}}>VS</div>}
+                          </div>
+                          {isTied&&<div style={{padding:"8px 18px",background:"#1a1500",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",borderTop:"1px solid #2a2000"}}>🔄 Tie — same dancers battle again</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1980,6 +2130,18 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
                               <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555"}}>{p.city}</div>
                               {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:col.primary,marginTop:3,letterSpacing:1}}>🏆 WINNER</div>}
                               {!isDecided&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#444",marginTop:3}}>tap to force</div>}
+                              {!isDecided&&!isForced&&(
+                                <button
+                                  onClick={e=>{e.stopPropagation();
+                                    // Auto-advance the opponent(s)
+                                    const opponents=fighters.filter(f=>f.id!==p.id);
+                                    if(opponents.length===1){setForceWinners(fw=>({...fw,[forceKey]:opponents[0].id}));}
+                                    showToast(`${p.name} marked absent — opponent advances`);
+                                  }}
+                                  style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#ff9800",background:"#1a0e00",border:"1px solid #ff980033",borderRadius:4,padding:"2px 6px",marginTop:5,cursor:"pointer",display:"block",width:"100%"}}>
+                                  ⚠ ABSENT
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -2008,7 +2170,7 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
         );
       })}
 
-      {/* ── CHAMPION SCREEN ── */}
+      {/* ── WINNER DASHBOARD ── */}
       {(()=>{
         if(!confirmed||!activeN)return null;
         const finalsRound=activeRounds[activeRounds.length-1];
@@ -2018,25 +2180,46 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
         const finalsSeed=getSeedListForRound(finalsRound);
         const finalsBattles=buildRoundBattlesFixed(finalsRound,finalsSeed);
         if(!finalsBattles.length)return null;
-        const champBattles=finalsBattles.filter(b=>{
+        const champBattle=finalsBattles.find(b=>{
           const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===b.match_index);
           return resolveWithForce(finalsRound,b.match_index,decs).status==="decided";
         });
-        if(!champBattles.length)return null;
+        if(!champBattle)return null;
+        const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===champBattle.match_index);
+        const res=resolveWithForce(finalsRound,champBattle.match_index,decs);
+        const champ=participantMap[res.winner_id];
+        const finalists=[champBattle.p1,champBattle.p2];
+        const runnerUp=finalists.find(p=>p.id!==res.winner_id);
+        if(!champ)return null;
         return (
-          <div style={{background:"linear-gradient(135deg,#1a1200,#0f0a00)",border:`2px solid ${col.primary}`,borderRadius:16,padding:"32px 24px",textAlign:"center",marginBottom:16}}>
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:6,color:col.primary,marginBottom:10}}>🏆 CHAMPION · {activeCat}</div>
-            {champBattles.map(b=>{
-              const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===b.match_index);
-              const res=resolveWithForce(finalsRound,b.match_index,decs);
-              const champ=participantMap[res.winner_id];
-              return champ?(
-                <div key={b.match_index}>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:64,color:col.primary,lineHeight:1,marginBottom:4}}>{champ.name}</div>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#888"}}>{champ.city} · Winner of {event.name}</div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:6,color:col.primary,marginBottom:12,textAlign:"center"}}>🏆 FINAL RESULTS · {activeCat}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {/* Champion */}
+              <div style={{background:"linear-gradient(135deg,#1a1200,#0f0a00)",border:`2px solid ${col.primary}`,borderRadius:16,padding:"28px 20px",textAlign:"center",position:"relative"}}>
+                <div style={{position:"absolute",top:10,left:0,right:0,display:"flex",justifyContent:"center"}}>
+                  <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,letterSpacing:3,color:col.primary,background:col.bg,padding:"3px 12px",borderRadius:20,border:`1px solid ${col.border}`}}>CHAMPION</span>
                 </div>
-              ):null;
-            })}
+                <div style={{fontSize:36,marginBottom:4,marginTop:10}}>🏆</div>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:34,color:col.primary,lineHeight:1,marginBottom:4}}>{champ.name}</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888",marginBottom:6}}>{champ.city}</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{event.name}</div>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:2,color:col.primary,marginTop:4}}>{activeCat}</div>
+              </div>
+              {/* Runner-Up */}
+              {runnerUp&&(
+                <div style={{background:"linear-gradient(135deg,#141414,#0a0a0a)",border:"2px solid #aaaaaa88",borderRadius:16,padding:"28px 20px",textAlign:"center",position:"relative"}}>
+                  <div style={{position:"absolute",top:10,left:0,right:0,display:"flex",justifyContent:"center"}}>
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,letterSpacing:3,color:"#aaa",background:"#1a1a1a",padding:"3px 12px",borderRadius:20,border:"1px solid #44444488"}}>RUNNER-UP</span>
+                  </div>
+                  <div style={{fontSize:36,marginBottom:4,marginTop:10}}>🥈</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:34,color:"#ccc",lineHeight:1,marginBottom:4}}>{runnerUp.name}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888",marginBottom:6}}>{runnerUp.city}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{event.name}</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:2,color:"#aaa",marginTop:4}}>{activeCat}</div>
+                </div>
+              )}
+            </div>
           </div>
         );
       })()}
@@ -2135,7 +2318,7 @@ function Dashboard({ event, onBack, showToast }) {
 
   const addParticipant=useCallback(async(form)=>{
     if(!form.name.trim()||!form.city.trim())return showToast("Fill name and city!","error");
-    const{error}=await supabase.from("participants").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone?.trim()||null,category:activeCat});
+    const{error}=await supabase.from("participants").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone?.trim()||null,category:activeCat,payment_method:form.payment_method||"cash"});
     if(error)return showToast("Failed: "+error.message,"error");
     showToast(`${form.name} added to ${activeCat}!`);
   },[activeCat,event.id,showToast]);
@@ -2309,13 +2492,76 @@ function Dashboard({ event, onBack, showToast }) {
         {tab==="checkin"&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:6}}>CHECK-IN · {activeCat}</div>
+            {/* Legend */}
+            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+              {[{label:"REGISTERED",bg:"#ff4d4d22",c:"#ff4d4d"},{label:"CHECKED IN",bg:"#00c85322",c:"#00c853"},{label:"DISQUALIFIED",bg:"#55555522",c:"#888"}].map(s=>(
+                <span key={s.label} className="badge" style={{background:s.bg,color:s.c,border:`1px solid ${s.c}44`,fontSize:9}}>{s.label}</span>
+              ))}
+            </div>
             <input className="inp" placeholder="Search dancer..." value={searchQr} onChange={e=>setSearchQr(e.target.value)} style={{maxWidth:300,marginBottom:16}}/>
+            {/* Summary counts */}
+            <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+              {[
+                {label:"REGISTERED",val:catParts.length,color:"#fff"},
+                {label:"CHECKED IN",val:catParts.filter(p=>p.checked_in).length,color:"#00c853"},
+                {label:"NOT CHECKED IN",val:catParts.filter(p=>!p.checked_in&&!p.disqualified).length,color:"#ff4d4d"},
+                {label:"DISQUALIFIED",val:catParts.filter(p=>p.disqualified).length,color:"#888"},
+              ].map(s=>(
+                <div key={s.label} style={{background:"#0f0f0f",border:"1px solid #181818",borderRadius:8,padding:"6px 12px",textAlign:"center"}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:s.color,lineHeight:1}}>{s.val}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#444",letterSpacing:2,marginTop:2}}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+            {/* Push not-checked-in to Emcee */}
+            {catParts.filter(p=>!p.checked_in&&!p.disqualified).length>0&&(
+              <div style={{background:"#0a1a00",border:"1px solid #7fff0033",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:2,color:"#7fff00",marginBottom:6}}>📣 LAST CALL — NOT YET CHECKED IN</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#888",marginBottom:8}}>
+                  Push these names to the Emcee for a final announcement before disqualification:
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+                  {catParts.filter(p=>!p.checked_in&&!p.disqualified).map(p=>(
+                    <span key={p.id} style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,padding:"4px 10px",background:"#111",border:"1px solid #ff4d4d44",borderRadius:20,color:"#ff4d4d"}}>{p.name}</span>
+                  ))}
+                </div>
+                <button className="btn" style={{background:"#7fff00",color:"#000",fontSize:11,padding:"8px 18px"}}
+                  onClick={async()=>{
+                    const names=catParts.filter(p=>!p.checked_in&&!p.disqualified).map(p=>p.name).join(", ");
+                    const msg=`🎤 LAST CALL — Please check in NOW or you will be disqualified: ${names}`;
+                    const{error}=await supabase.from("event_notifications").insert({event_id:event.id,message:msg,round:"Check-In"});
+                    if(error)showToast("Failed to push to Emcee","error");
+                    else showToast("📣 Last call pushed to Emcee screen ✓");
+                  }}>
+                  📣 PUSH LAST CALL TO EMCEE
+                </button>
+              </div>
+            )}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(185px,1fr))",gap:12}}>
               {catParts.filter(p=>p.name.toLowerCase().includes(searchQr.toLowerCase())).map(p=>(
-                <div key={p.id} className="card" style={{textAlign:"center",border:`1px solid ${p.checked_in?col.border:"#1e1e1e"}`}}>
+                <div key={p.id} className="card" style={{textAlign:"center",border:`1px solid ${p.disqualified?"#33333388":p.checked_in?col.border:"#1e1e1e"}`,opacity:p.disqualified?0.5:1}}>
                   <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,marginBottom:2}}>{p.name}</div>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginBottom:10}}>{p.city}</div>
-                  {p.checked_in?<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ CHECKED IN</span>:<button className="btn" style={{background:"#00c853",color:"#000",fontSize:11,width:"100%"}} onClick={()=>checkIn(p.id)}>CHECK IN</button>}
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginBottom:6}}>{p.city}</div>
+                  {p.payment_method&&<div style={{marginBottom:8}}><span className="badge" style={{background:p.payment_method==="online"?"#00e5ff22":"#ffd70022",color:p.payment_method==="online"?"#00e5ff":"#ffd700",fontSize:9}}>{p.payment_method==="online"?"📲 Online":"💵 Cash"}</span></div>}
+                  {p.disqualified?(
+                    <div>
+                      <span className="badge" style={{background:"#22222244",color:"#888",border:"1px solid #44444444",display:"block",marginBottom:6}}>✗ DISQUALIFIED</span>
+                      <button style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",background:"none",border:"1px solid #2a2a2a",borderRadius:4,padding:"2px 8px",cursor:"pointer",width:"100%"}}
+                        onClick={async()=>{await supabase.from("participants").update({disqualified:false}).eq("id",p.id);showToast("Reinstated ✓");}}>
+                        ↩ Reinstate
+                      </button>
+                    </div>
+                  ):p.checked_in?(
+                    <span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ CHECKED IN</span>
+                  ):(
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <button className="btn" style={{background:"#00c853",color:"#000",fontSize:11,width:"100%"}} onClick={()=>checkIn(p.id)}>CHECK IN</button>
+                      <button className="btn" style={{background:"#1a0a0a",color:"#ff4d4d",border:"1px solid #ff4d4d44",fontSize:10,width:"100%",padding:"6px"}}
+                        onClick={async()=>{const{error}=await supabase.from("participants").update({disqualified:true}).eq("id",p.id);if(error)showToast("Failed","error");else showToast(`${p.name} disqualified`,"error");}}>
+                        ✗ DISQUALIFY
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -2413,7 +2659,8 @@ export default function App() {
   const [screen,setScreen]=useState("loading");
   const [activeEvent,setActiveEvent]=useState(null);
   const [judgeData,setJudgeData]=useState(null);
-  const [attendeeData,setViewerData]=useState(null);
+  const [viewerData,setViewerData]=useState(null);
+  const [emceeData,setEmceeData]=useState(null);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
 
