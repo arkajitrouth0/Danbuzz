@@ -233,9 +233,52 @@ function Toast({toast}) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// LIVE NOTIFICATION HOOK — used by Judge, Emcee, Attendee dashboards
+// Subscribes to event_notifications table and shows a popup banner
+// ─────────────────────────────────────────────────────────────────
+function useLiveNotifications(eventId) {
+  const [notif, setNotif] = useState(null);
+  useEffect(() => {
+    if (!eventId) return;
+    const ch = supabase.channel(`notif-${eventId}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public",
+        table: "event_notifications",
+        filter: `event_id=eq.${eventId}`
+      }, (p) => {
+        setNotif(p.new);
+        setTimeout(() => setNotif(null), 6000);
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [eventId]);
+  return notif;
+}
+
+function LiveNotifBanner({ notif }) {
+  if (!notif) return null;
+  return (
+    <div className="slide" style={{
+      position:"fixed",top:0,left:0,right:0,zIndex:9998,
+      background:"linear-gradient(135deg,#1a0800,#2a1200)",
+      border:"none",borderBottom:"3px solid #ff9800",
+      padding:"14px 24px",display:"flex",alignItems:"center",gap:14,
+      boxShadow:"0 4px 32px #ff980044"
+    }}>
+      <div className="pulse" style={{width:10,height:10,borderRadius:"50%",background:"#ff9800",flexShrink:0}}/>
+      <div style={{flex:1}}>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:"#ff9800",letterSpacing:4,marginBottom:2}}>📢 ANNOUNCEMENT</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:15,color:"#fff",fontWeight:700}}>{notif.message}</div>
+      </div>
+      {notif.round&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff9800",letterSpacing:2,background:"#ff980022",border:"1px solid #ff980044",borderRadius:6,padding:"4px 12px"}}>{notif.round}</span>}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // LANDING
 // ─────────────────────────────────────────────────────────────────
-function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onViewerLogin }) {
+function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onAttendeeLogin }) {
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,textAlign:"center",background:"#080808"}}>
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:64,letterSpacing:6,lineHeight:1}}>DAN<span style={{color:"#ff4d4d"}}>BUZZ</span></div>
@@ -243,7 +286,7 @@ function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onViewerLogin }
       <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:320}}>
         <button className="btn" style={{background:"#ff4d4d",color:"#000",fontSize:14,padding:"15px"}} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
         <button className="btn" style={{background:"#111",color:"#aaa",border:"1px solid #222",fontSize:13,padding:"14px"}} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
-        <button className="btn" style={{background:"#111",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onViewerLogin}>👁 VIEWER REGISTRATION / LIVE VIEW</button>
+        <button className="btn" style={{background:"#111",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onAttendeeLogin}>👁 ATTENDEE REGISTRATION / LIVE VIEW</button>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#333",marginTop:4}}>First time as a judge? Judge Login handles registration too.</div>
       </div>
       <div style={{marginTop:52,borderTop:"1px solid #111",paddingTop:20}}>
@@ -321,7 +364,7 @@ function AdminDashboard({ onBack, showToast }) {
                 <div key={ev.id} style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:12,padding:"16px 20px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
                   <div>
                     <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:2}}>{ev.name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",marginTop:2}}>{ev.city} · {ev.date}</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",marginTop:2}}>{ev.city} · {ev.start_date||ev.date}{ev.end_date&&ev.end_date!==ev.start_date?" → "+ev.end_date:""}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
                       {cats.slice(0,5).map((cat,i)=>{const c=PALETTE[i%PALETTE.length];return <span key={cat} style={{fontFamily:"Barlow,sans-serif",fontSize:9,padding:"2px 8px",borderRadius:10,background:c.bg,border:`1px solid ${c.border}`,color:c.primary}}>{cat}</span>;})}
                       {cats.length>5&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#444"}}>+{cats.length-5} more</span>}
@@ -353,7 +396,7 @@ function AdminDashboard({ onBack, showToast }) {
 // ADMIN: CREATE EVENT
 // ─────────────────────────────────────────────────────────────────
 function AdminCreateEvent({ showToast, onCreated }) {
-  const [form,setForm]=useState({name:"",date:"",city:"",organizer:""});
+  const [form,setForm]=useState({name:"",start_date:"",end_date:"",city:"",organizer:""});
   const [categories,setCategories]=useState([]);
   const [customInput,setCustomInput]=useState("");
   const [judgeCounts,setJudgeCounts]=useState({});
@@ -370,14 +413,14 @@ function AdminCreateEvent({ showToast, onCreated }) {
   const orderedRounds=["Prelims",...ALL_POST_PRELIM_ROUNDS.filter(r=>selectedRounds.includes(r))];
 
   const submit=async()=>{
-    if(!form.name.trim()||!form.date||!form.city.trim())return showToast("Fill event name, date and city!","error");
+    if(!form.name.trim()||!form.start_date||!form.city.trim())return showToast("Fill event name, start date and city!","error");
     if(categories.length===0)return showToast("Add at least one category!","error");
     if(selectedRounds.length===0)return showToast("Select at least one round after Prelims!","error");
     setLoading(true);
     const orgCode=genOrgCode(); const viewerCode=genViewerCode(); const prefix=randAlpha(3);
     const jCodes=genJudgeCodes(prefix,categories,judgeCounts);
     const{data:ev,error:evErr}=await supabase.from("events").insert({
-      name:form.name.trim(),city:form.city.trim(),date:form.date,
+      name:form.name.trim(),city:form.city.trim(),start_date:form.start_date,end_date:form.end_date||null,
       org_code:orgCode,viewer_code:viewerCode,categories,
       organizer_name:form.organizer.trim()||null,
       judge_counts:judgeCounts,rounds:orderedRounds
@@ -395,7 +438,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
       <div className="slide">
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#00c853",letterSpacing:3,marginBottom:6}}>✓ EVENT CREATED</div>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:2,marginBottom:2}}>{createdEvent.name}</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:20}}>{createdEvent.city} · {createdEvent.date}</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:20}}>{createdEvent.city} · {createdEvent.start_date}{createdEvent.end_date&&createdEvent.end_date!==createdEvent.start_date?" → "+createdEvent.end_date:""}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
           <div style={{background:"#0f0f0f",border:"1px solid #ff4d4d44",borderRadius:12,padding:20}}>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d",letterSpacing:3,marginBottom:8}}>ORGANIZER CODE</div>
@@ -405,12 +448,12 @@ function AdminCreateEvent({ showToast, onCreated }) {
             </div>
           </div>
           <div style={{background:"#0f0f0f",border:"1px solid #00e5ff44",borderRadius:12,padding:20}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>VIEWER / PARTICIPANT CODE</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>ATTENDEE CODE</div>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,letterSpacing:3,color:"#00e5ff"}}>{createdEvent.viewer_code}</div>
               <button className="btn" style={{fontSize:10,padding:"6px 14px",background:"transparent",border:"1px solid #00e5ff44",color:"#00e5ff"}} onClick={()=>copy(createdEvent.viewer_code)}>{copied===createdEvent.viewer_code?"✓ COPIED":"COPY"}</button>
             </div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#444",marginTop:4}}>Share with participants & attendees for live view</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#444",marginTop:4}}>Share with attendees for live event updates</div>
           </div>
         </div>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:3,marginBottom:14}}>JUDGE CODES</div>
@@ -434,7 +477,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
             );
           })}
         </div>
-        <button className="btn" style={{background:"#111",color:"#fff",border:"1px solid #2a2a2a",fontSize:12}} onClick={()=>{setCreatedEvent(null);setForm({name:"",date:"",city:"",organizer:""});setCategories([]);setJudgeCounts({});setSelectedRounds(["Top 16","Top 8","Top 4","Finals"]);onCreated();}}>← BACK TO ALL EVENTS</button>
+        <button className="btn" style={{background:"#111",color:"#fff",border:"1px solid #2a2a2a",fontSize:12}} onClick={()=>{setCreatedEvent(null);setForm({name:"",start_date:"",end_date:"",city:"",organizer:""});setCategories([]);setJudgeCounts({});setSelectedRounds(["Top 16","Top 8","Top 4","Finals"]);onCreated();}}>← BACK TO ALL EVENTS</button>
       </div>
     );
   }
@@ -446,12 +489,22 @@ function AdminCreateEvent({ showToast, onCreated }) {
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>ORGANIZER NAME <span style={{color:"#333"}}>(optional)</span></div>
         <input className="inp" placeholder="e.g. Rhythmix Crew" value={form.organizer} onChange={e=>setForm(f=>({...f,organizer:e.target.value}))}/>
       </div>
-      {[["Event Name","name","text","e.g. Danbuzz Open 2025"],["City / Venue","city","text","e.g. Imphal, Manipur"],["Event Date","date","date",""]].map(([label,key,type,ph])=>(
+      {[["Event Name","name","text","e.g. Danbuzz Open 2025"],["City / Venue","city","text","e.g. Imphal, Manipur"]].map(([label,key,type,ph])=>(
         <div key={key} style={{marginBottom:14}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>{label}</div>
           <input className="inp" type={type} placeholder={ph} value={form[key]} onChange={e=>setForm(f=>({...f,[key]:e.target.value}))}/>
         </div>
       ))}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+        <div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>START DATE <span style={{color:"#ff4d4d"}}>*</span></div>
+          <input className="inp" type="date" value={form.start_date} onChange={e=>setForm(f=>({...f,start_date:e.target.value}))}/>
+        </div>
+        <div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>END DATE <span style={{color:"#333"}}>(optional)</span></div>
+          <input className="inp" type="date" value={form.end_date} onChange={e=>setForm(f=>({...f,end_date:e.target.value}))}/>
+        </div>
+      </div>
 
       {/* Rounds */}
       <div style={{margin:"20px 0 0"}}>
@@ -546,7 +599,7 @@ function OrgLoginScreen({ onBack, onLogin, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // VIEWER LOGIN
 // ─────────────────────────────────────────────────────────────────
-function ViewerLoginScreen({ onBack, onLogin, showToast }) {
+function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
   const [viewerCode,setViewerCode]=useState(""); const [name,setName]=useState(""); const [city,setCity]=useState("");
   const [phone,setPhone]=useState(""); const [loading,setLoading]=useState(false); const [event,setEvent]=useState(null);
 
@@ -571,8 +624,8 @@ function ViewerLoginScreen({ onBack, onLogin, showToast }) {
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"#080808"}}>
       <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={()=>{if(event)setEvent(null);else onBack();}}>← BACK</button>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>VIEWER REGISTRATION</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>{!event?"Enter your event code to watch live updates.":"Register as a viewer to track this event in real-time."}</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>ATTENDEE REGISTRATION</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>{!event?"Enter your event code to follow the event live.":"Register as an attendee to follow this event live."}</div>
         {!event?(
           <>
             <div style={{marginBottom:14}}>
@@ -588,7 +641,7 @@ function ViewerLoginScreen({ onBack, onLogin, showToast }) {
               <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555"}}>{event.city} · {event.date}</div>
             </div>
             <div style={{background:"#001a1a",border:"1px solid #00e5ff22",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00e5ff88"}}>
-              👁 Registering as a Viewer — participants register via check-in at the event.
+              🎟 Registering as an Attendee — participants register via check-in at the event.
             </div>
             {[["Name",name,setName,"text"],["City",city,setCity,"text"],["Phone",phone,setPhone,"tel"]].map(([label,val,setter,type])=>(
               <div key={label} style={{marginBottom:12}}>
@@ -596,7 +649,7 @@ function ViewerLoginScreen({ onBack, onLogin, showToast }) {
                 <input className="inp" type={type} placeholder={label} value={val} onChange={e=>setter(e.target.value)}/>
               </div>
             ))}
-            <button className="btn" style={{background:"#00e5ff",color:"#000",width:"100%",fontSize:14,padding:"13px",marginTop:8}} onClick={handleRegister} disabled={loading}>{loading?<Spinner/>:"REGISTER & WATCH LIVE →"}</button>
+            <button className="btn" style={{background:"#00e5ff",color:"#000",width:"100%",fontSize:14,padding:"13px",marginTop:8}} onClick={handleRegister} disabled={loading}>{loading?<Spinner/>:"REGISTER & FOLLOW LIVE →"}</button>
           </>
         )}
       </div>
@@ -658,8 +711,9 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const categories = event.categories||[];
   const rounds     = event.rounds||["Prelims","Finals"];
   const myCategory = judgeCode.category;
-  const myKey        = `${myCategory}-J${judgeCode.slot}`;
-  const col          = getCatColor(categories, myCategory);
+  const liveNotif  = useLiveNotifications(event.id);
+  const myKey      = `${myCategory}-J${judgeCode.slot}`;
+  const col        = getCatColor(categories, myCategory);
 
   const [tab,setTab]               = useState("scoring");
   const [currentRound,setCurrentRound] = useState(rounds[0]||"Prelims");
@@ -672,9 +726,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   // UI state: per match_index, what the judge has selected but not yet submitted
   const [battleChoices,setBattleChoices] = useState({});
 
-  const isPrelim    = currentRound === "Prelims";
-  // Prelims = score round; all knockout rounds = name card voting
-  const isScoreRound = isPrelim;
+  const isPrelim = currentRound === "Prelims";
 
   const loadAll = async () => {
     setLoading(true);
@@ -798,7 +850,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
-      <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto"}}>
+      <LiveNotifBanner notif={liveNotif}/>
+      <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:42,letterSpacing:5,lineHeight:1}}>{event.name}</div>
@@ -806,19 +859,23 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
               <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#00c853"}}/>
               <div>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,color:col.primary}}>{judgeCode.judge_name}</div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Judge {judgeCode.slot} · {myCategory} · {isScoreRound?"Prelims — score each dancer 1–10":"Knockout — pick a winner by name card"}</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Judge {judgeCode.slot} · {myCategory} · {isPrelim?"Prelims (score each dancer)":"Knockout (choose winner per battle)"}</div>
               </div>
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-              {rounds.map(r=><option key={r}>{r}</option>)}
-            </select>
+            {rounds.length>0?(
+              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+                {rounds.map(r=><option key={r}>{r}</option>)}
+              </select>
+            ):(
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",padding:"7px 12px",background:"#111",borderRadius:8,border:"1px solid #222"}}>Knockout not started yet</div>
+            )}
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← LOGOUT</button>
           </div>
         </div>
         <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",overflowX:"auto"}}>
-          {[{key:"scoring",label:isScoreRound?"SCORING":"BATTLE JUDGING"},{key:"leaderboard",label:"LEADERBOARD"}].map(t=>(
+          {[{key:"scoring",label:isPrelim?"PRELIM SCORING":"BATTLE JUDGING"},{key:"leaderboard",label:"LEADERBOARD"}].map(t=>(
             <button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#555",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>
           ))}
         </div>
@@ -827,14 +884,14 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
 
         {/* ── PRELIM SCORING ── */}
-        {tab==="scoring"&&isScoreRound&&(
+        {tab==="scoring"&&isPrelim&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIMS · {myCategory} · SCORE EACH DANCER</div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:6}}>
               Scoring as <span style={{color:col.primary}}>{judgeCode.judge_name}</span>. Give each dancer a score from 1–10 based on their solo performance.
             </div>
             <div style={{background:"#1a1a0a",border:"1px solid #ffd70033",borderRadius:8,padding:"8px 14px",marginBottom:18,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>
-              ⚡ Scores from all judges determine prelim ranking and knockout seeding.
+              ⚡ Total score from all judges in this category determines prelim ranking and knockout seeding.
             </div>
             {checkedIn.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>No checked-in participants yet</div>}
             {checkedIn.map(p=>{
@@ -856,8 +913,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
           </div>
         )}
 
-        {/* ── KNOCKOUT BATTLE JUDGING (card mode rounds only) ── */}
-        {tab==="scoring"&&!isScoreRound&&(
+        {/* ── KNOCKOUT BATTLE JUDGING ── */}
+        {tab==="scoring"&&!isPrelim&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>{currentRound} · {myCategory} · PICK YOUR WINNER</div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:4}}>
@@ -968,35 +1025,6 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             })}
           </div>
         )}
-
-        {/* ── CHAMPION BANNER ── show when Finals is decided ── */}
-        {(()=>{
-          if(currentRound!=="Finals"||tab!=="scoring")return null;
-          const finalsBattles=currentBattles;
-          if(!finalsBattles.length)return null;
-          const allResolved=finalsBattles.every(b=>{
-            const decs=getBattleDecisions(b.match_index);
-            return resolveBattle(decs).status==="decided";
-          });
-          if(!allResolved)return null;
-          // All Finals battles decided — show champion for each
-          return (
-            <div style={{marginBottom:20}}>
-              {finalsBattles.map(b=>{
-                const decs=getBattleDecisions(b.match_index);
-                const res=resolveBattle(decs);
-                if(res.status!=="decided")return null;
-                return (
-                  <div key={b.match_index} style={{background:"linear-gradient(135deg,#1a1200,#0a0800)",border:`2px solid ${col.primary}`,borderRadius:16,padding:"28px 24px",textAlign:"center",marginBottom:12}}>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:5,color:col.primary,marginBottom:8}}>🏆 CHAMPION · {myCategory}</div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:52,color:col.primary,lineHeight:1,marginBottom:6}}>{res.winner_name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#888"}}>Winner of the Finals · {event.name}</div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
 
         {/* ── LEADERBOARD ── */}
         {tab==="leaderboard"&&(
@@ -1229,15 +1257,18 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
 }
 
 // ─────────────────────────────────────────────────────────────────
-// VIEWER DASHBOARD
+// ATTENDEE DASHBOARD
 // ─────────────────────────────────────────────────────────────────
-function ViewerDashboard({ event, viewerName, onBack }) {
+function AttendeeDashboard({ event, attendeeName, onBack }) {
   const categories = event.categories||[];
-  const rounds     = event.rounds||["Prelims","Finals"];
+  const allRounds  = event.rounds||["Prelims","Finals"];
+  const liveNotif  = useLiveNotifications(event.id);
+  // Attendees only see knockout rounds — prelims are hidden
+  const rounds     = allRounds.filter(r=>r!=="Prelims");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
-  const [currentRound,setCurrentRound]=useState(rounds[0]||"Prelims");
+  const [currentRound,setCurrentRound]=useState(rounds[0]||"");
   const col=getCatColor(categories,activeCat);
-  const isPrelim=currentRound==="Prelims";
+  const isPrelim=false; // attendees never see prelims
 
   const [participants,setParticipants]=useState([]);
   const [scores,setScores]=useState([]);
@@ -1277,26 +1308,31 @@ function ViewerDashboard({ event, viewerName, onBack }) {
     return a.name.localeCompare(b.name);
   });
   const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
-  const currentBattles=isPrelim?[]:buildRoundBattles(currentRound, rounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap);
+  const currentBattles=currentRound?buildRoundBattles(currentRound, allRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap):[];
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080808"}}><Spinner/></div>;
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
-      <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto"}}>
+      <LiveNotifBanner notif={liveNotif}/>
+      <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:48,letterSpacing:5,lineHeight:1}}>{event.name}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:4,marginTop:2}}>{event.city} · {event.date}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:4,marginTop:2}}>{event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}</div>
             <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
               <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#00c853"}}/>
-              <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444",letterSpacing:2}}>LIVE · Viewing as {viewerName}</span>
+              <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444",letterSpacing:2}}>LIVE · Attendee: {attendeeName}</span>
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-              {rounds.map(r=><option key={r}>{r}</option>)}
-            </select>
+            {rounds.length>0?(
+              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+                {rounds.map(r=><option key={r}>{r}</option>)}
+              </select>
+            ):(
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",padding:"7px 12px",background:"#111",borderRadius:8,border:"1px solid #222"}}>Knockout not started yet</div>
+            )}
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← EXIT</button>
           </div>
         </div>
@@ -1308,18 +1344,10 @@ function ViewerDashboard({ event, viewerName, onBack }) {
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:16}}>{currentRound} · {activeCat}</div>
 
-        {isPrelim?(
-          // Prelim: ranked leaderboard with total score
-          <div style={{background:"#0c0c0c",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
-            {prelimRanked.map((p,i)=>(
-              <div key={p.id} className="lrow">
-                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#222",minWidth:36}}>#{i+1}</div>
-                <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div></div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginRight:6}}>TOTAL</div>
-                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#fff",minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-              </div>
-            ))}
-            {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#333"}}>Prelims in progress…</div>}
+        {!currentRound?(
+          <div style={{textAlign:"center",padding:"48px",background:"#0d0d0d",border:"1px solid #1a1a1a",borderRadius:12}}>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#333",letterSpacing:2,marginBottom:8}}>KNOCKOUT ROUNDS NOT STARTED</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#333"}}>Prelims are in progress. Knockout battles will appear here once the host starts the bracket.</div>
           </div>
         ):(
           // Knockout: show battles with results
@@ -1354,7 +1382,225 @@ function ViewerDashboard({ event, viewerName, onBack }) {
                 </div>
               );
             })}
-            {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for prelim scores to set battle seeding…</div>}
+            {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to begin…</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EMCEE LOGIN
+// Uses the same viewer_code as attendees, but with role "emcee"
+// ─────────────────────────────────────────────────────────────────
+function EmceeLoginScreen({ onBack, onLogin, showToast }) {
+  const [code,setCode]=useState(""); const [name,setName]=useState(""); const [loading,setLoading]=useState(false);
+  const handleLogin=async()=>{
+    if(!code.trim())return showToast("Enter event code!","error");
+    if(!name.trim())return showToast("Enter your name!","error");
+    setLoading(true);
+    const{data,error}=await supabase.from("events").select("*").eq("viewer_code",code.trim().toUpperCase()).single();
+    if(error||!data){showToast("Invalid event code!","error");setLoading(false);return;}
+    showToast(`Welcome, ${name.trim()}! Loading Emcee dashboard…`);
+    onLogin({event:data,name:name.trim()});setLoading(false);
+  };
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"#080808"}}>
+      <div style={{width:"100%",maxWidth:400}}>
+        <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎤 EMCEE LOGIN</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the event code and your name to access the Emcee dashboard.</div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>EVENT CODE</div>
+          <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={code} onChange={e=>setCode(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+        </div>
+        <div style={{marginBottom:20}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>YOUR NAME</div>
+          <input className="inp" placeholder="Your full name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+        </div>
+        <button className="btn" style={{background:"#ff9800",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={handleLogin} disabled={loading}>{loading?<Spinner/>:"ENTER EMCEE DASHBOARD →"}</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// EMCEE DASHBOARD
+// Full read-only view: all participants, all rounds, all battle
+// results live. Plus live notification banner. No scoring/voting.
+// ─────────────────────────────────────────────────────────────────
+function EmceeDashboard({ event, emceeName, onBack }) {
+  const categories   = event.categories||[];
+  const rounds       = event.rounds||["Prelims","Finals"];
+  const [activeCat,setActiveCat]     = useState(categories[0]||"");
+  const [currentRound,setCurrentRound] = useState(rounds[0]||"Prelims");
+  const col          = getCatColor(categories,activeCat);
+  const isPrelim     = currentRound==="Prelims";
+  const liveNotif    = useLiveNotifications(event.id);
+
+  const [participants,setParticipants] = useState([]);
+  const [scores,setScores]             = useState([]);
+  const [battles,setBattles]           = useState([]);
+  const [loading,setLoading]           = useState(true);
+
+  useEffect(()=>{
+    const load=async()=>{
+      setLoading(true);
+      const[pRes,sRes,bRes]=await Promise.all([
+        supabase.from("participants").select("*").eq("event_id",event.id),
+        supabase.from("scores").select("*").eq("event_id",event.id),
+        supabase.from("battle_decisions").select("*").eq("event_id",event.id),
+      ]);
+      if(pRes.data)setParticipants(pRes.data);
+      if(sRes.data)setScores(sRes.data);
+      if(bRes.data)setBattles(bRes.data);
+      setLoading(false);
+    };
+    load();
+    const pCh=supabase.channel(`ep-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"participants",filter:`event_id=eq.${event.id}`},(p)=>setParticipants(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"participants",filter:`event_id=eq.${event.id}`},(p)=>setParticipants(prev=>prev.map(x=>x.id===p.new.id?p.new:x))).subscribe();
+    const sCh=supabase.channel(`es-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"scores",filter:`event_id=eq.${event.id}`},(p)=>setScores(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"scores",filter:`event_id=eq.${event.id}`},(p)=>setScores(prev=>prev.map(s=>s.id===p.new.id?p.new:s))).subscribe();
+    const bCh=supabase.channel(`eb-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>setBattles(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>setBattles(prev=>prev.map(b=>b.id===p.new.id?p.new:b))).subscribe();
+    return()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);};
+  },[event.id]);
+
+  const scoreMap={};
+  scores.forEach(s=>{if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score;});
+  const getScore=(pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;};
+  const catParts     = participants.filter(p=>p.category===activeCat);
+  const checkedIn    = catParts.filter(p=>p.checked_in);
+  const prelimRanked = [...checkedIn].sort((a,b)=>{
+    const sa=getScore(a.id),sb=getScore(b.id);
+    if(sb!==sa)return sb-sa;
+    const aMax=Math.max(0,...Object.values(scoreMap[a.id]||{}));
+    const bMax=Math.max(0,...Object.values(scoreMap[b.id]||{}));
+    if(bMax!==aMax)return bMax-aMax;
+    return a.name.localeCompare(b.name);
+  });
+  const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
+  const currentBattles=isPrelim?[]:buildRoundBattles(currentRound,rounds,prelimRanked,battles.filter(b=>b.category===activeCat),participantMap);
+
+  if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080808"}}><Spinner/></div>;
+
+  return (
+    <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
+      <LiveNotifBanner notif={liveNotif}/>
+      <div style={{padding:"22px 22px 0",maxWidth:1000,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
+
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:12}}>
+          <div>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:48,letterSpacing:5,lineHeight:1}}>{event.name}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>
+              {event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
+              <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#ff9800"}}/>
+              <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff9800",letterSpacing:2}}>🎤 EMCEE · {emceeName}</span>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+              {rounds.map(r=><option key={r}>{r}</option>)}
+            </select>
+            <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← EXIT</button>
+          </div>
+        </div>
+
+        {/* Category tabs */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+          {categories.map(cat=>{const c=getCatColor(categories,cat);const cnt=participants.filter(p=>p.category===cat&&p.checked_in).length;const active=activeCat===cat;return <button key={cat} className="btn" style={{fontSize:11,padding:"7px 14px",background:active?c.primary:"#111",color:active?"#000":"#555",border:`1px solid ${active?c.primary:"#222"}`}} onClick={()=>setActiveCat(cat)}>{cat} <span style={{opacity:.7}}>({cnt})</span></button>;})}
+        </div>
+
+        {/* Stats bar */}
+        <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+          {[
+            {label:"TOTAL IN CATEGORY",val:catParts.length,color:"#fff"},
+            {label:"CHECKED IN",val:checkedIn.length,color:"#00c853"},
+            {label:"SCORED",val:checkedIn.filter(p=>getScore(p.id)>0).length,color:"#ffd700"},
+            {label:"BATTLES",val:battles.filter(b=>b.category===activeCat).length,color:"#ff9800"},
+          ].map(s=>(
+            <div key={s.label} style={{background:"#0f0f0f",border:"1px solid #181818",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:24,color:s.color,lineHeight:1}}>{s.val}</div>
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#444",letterSpacing:2,marginTop:2}}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{padding:"0 22px 40px",maxWidth:1000,margin:"0 auto"}}>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,color:col.primary,marginBottom:14}}>{currentRound} · {activeCat}</div>
+
+        {isPrelim?(
+          /* ── PRELIMS: full ranked list with scores ── */
+          <div>
+            <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
+              🎤 Prelims in progress — dancers are performing and being scored by judges.
+            </div>
+            <div style={{background:"#0c0c0c",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
+              {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#333"}}>No scored dancers yet</div>}
+              {prelimRanked.map((p,i)=>(
+                <div key={p.id} className="lrow" style={{background:i===0?"#0a1200":i===1?"#0a1000":i===2?"#0a0e00":"transparent"}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#222",minWidth:36}}>#{i+1}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{p.city}</div>
+                  </div>
+                  <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d",marginRight:8}}>{p.checked_in?"✓ IN":"PENDING"}</span>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginRight:6}}>SCORE</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#fff",minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ):(
+          /* ── KNOCKOUT: battles with live results ── */
+          <div>
+            <div style={{background:"#0f0f0f",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
+              🎤 {currentRound} battles — announce each battle as judges decide the winner.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>Waiting for bracket to be seeded…</div>}
+              {currentBattles.map((battle,bi)=>{
+                const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                const is3way=!!battle.p3;
+                const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
+                const result=resolveBattle(decs);
+                const isDecided=result.status==="decided";
+                const isTied=result.status==="tied";
+                return (
+                  <div key={battle.match_index} className="battle-card">
+                    <div style={{padding:"10px 18px",background:"#0a0a0a",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span>BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}</span>
+                      <div style={{display:"flex",gap:8}}>
+                        {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
+                        {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>🤝 TIE × {result.tie_round+1} — EXTRA BATTLE</span>}
+                        {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555"}}>Judges deciding…</span>}
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
+                      {fighters.map((p,fi)=>{
+                        const isWinner=isDecided&&result.winner_id===p.id;
+                        const isLoser=isDecided&&result.winner_id!==p.id;
+                        return (
+                          <div key={p.id} style={{padding:"16px 18px",textAlign:"center",
+                            background:isWinner?"#0a1e0a":isLoser?"#1a0a0a":"#0f0f0f",
+                            opacity:isLoser?0.45:1,
+                            borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
+                            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:"#444",letterSpacing:2,marginBottom:4}}>SEED #{battle.match_index*fighters.length+fi+1}</div>
+                            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
+                            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginTop:3}}>{p.city}</div>
+                            {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,marginTop:6,letterSpacing:1}}>🏆 WINNER</div>}
+                          </div>
+                        );
+                      })}
+                      {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#222"}}>VS</div>}
+                    </div>
+                    {isTied&&<div style={{padding:"8px 18px",background:"#1a1500",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",borderTop:"1px solid #2a2000"}}>🔄 Tie — same dancers battle again</div>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -1371,43 +1617,56 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
 
   const [advanceN, setAdvanceN] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  // forceWinners: { "RoundName-matchIndex": participantId }
   const [forceWinners, setForceWinners] = useState({});
-  // expandedRound: which round's battles are open for force-pick
   const [expandedRound, setExpandedRound] = useState(null);
+
+  // ── Notification sender ──────────────────────────────────────
+  const [notifMsg, setNotifMsg] = useState("");
+  const [notifRound, setNotifRound] = useState("");
+  const [notifSending, setNotifSending] = useState(false);
+
+  const sendNotification = async (msg, round) => {
+    if (!msg.trim()) return showToast("Enter a message!","error");
+    setNotifSending(true);
+    const { error } = await supabase.from("event_notifications").insert({
+      event_id: event.id,
+      message: msg.trim(),
+      round: round || null,
+    });
+    if (error) { showToast("Failed to send: "+error.message,"error"); setNotifSending(false); return; }
+    showToast("📢 Announcement sent!");
+    setNotifMsg(""); setNotifRound(""); setNotifSending(false);
+  };
+
+  const QUICK_ANNOUNCEMENTS = [
+    { label:"PRELIMS STARTING", msg:"Prelims are starting now! All participants please get ready.", round:"Prelims" },
+    { label:"TOP 32 STARTING",  msg:"Top 32 battles are about to begin! Take your positions.", round:"Top 32" },
+    { label:"TOP 16 STARTING",  msg:"Top 16 is starting now! The bracket heats up.", round:"Top 16" },
+    { label:"TOP 8 STARTING",   msg:"Top 8 — Quarterfinals starting now!", round:"Top 8" },
+    { label:"TOP 4 STARTING",   msg:"Top 4 — Semifinals starting now!", round:"Top 4" },
+    { label:"FINALS STARTING",  msg:"THE FINALS ARE STARTING! The crowd goes wild!", round:"Finals" },
+    { label:"SHORT BREAK",      msg:"Short break — back in 10 minutes.", round:"" },
+    { label:"RESULTS SOON",     msg:"Results coming up shortly. Stay tuned!", round:"" },
+  ];
 
   const totalIn = checkedIn.length;
   const parsed  = parseInt(advanceN);
 
-  // ── BRACKET SIZE VALIDATION (per spec) ──────────────────────────
-  // Derive the MAXIMUM allowed bracket the host can pick, based on
-  // how many dancers performed in Prelims.
-  //   >35 performers  → host can start at Top 32 or lower
-  //   25-35           → max Top 16
-  //   16-24           → max Top 16  (fits within)
-  //   <16             → host picks an appropriate size, no larger than totalIn
-  const getMaxBracket = (n) => {
-    if (n > 35) return 32;
-    if (n >= 25) return 16;
-    if (n >= 16) return 16;
-    return n; // allow any size up to totalIn for very small groups
-  };
+  // Bracket size rule: >35 dancers → max Top 32 | 25-35 → max Top 16 | <25 → fit naturally
+  const getMaxBracket = (n) => { if(n>35)return 32; if(n>=25)return 16; return n; };
   const maxAllowedBracket = totalIn > 0 ? getMaxBracket(totalIn) : 0;
 
-  // Valid = at least 2, no more than totalIn, AND no more than maxAllowedBracket
-  const validN = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn && parsed <= maxAllowedBracket;
-
-  // Show bracket-too-large error specifically when user tries to pick > maxAllowedBracket
+  const validN       = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn && parsed <= maxAllowedBracket;
   const bracketTooLarge = !isNaN(parsed) && parsed > maxAllowedBracket && parsed <= totalIn;
+  const activeN      = confirmed && validN ? parsed : null;
 
-  const activeN = confirmed && validN ? parsed : null;
-
-  // Quick pick buttons — powers of 2 that are ≤ maxAllowedBracket AND ≤ totalIn
+  // Quick pick buttons — only sizes ≤ maxAllowedBracket
   const quickOpts = [2,4,8,16,32].filter(n => n <= totalIn && n <= maxAllowedBracket);
 
   const advancing  = activeN ? prelimRanked.slice(0, activeN) : [];
 
-  // Active rounds: any knockout round whose limit fits within activeN
+  // Active rounds: any knockout round whose limit fits within activeN (after making pool even)
+  // We pair down to nearest even number if needed
   const activeRounds = activeN
     ? knockoutRounds.filter(r => {
         const limit = ROUND_LIMIT[r] ?? 0;
@@ -1492,6 +1751,44 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
         Control the live event flow. Decide how many advance from prelims, then run the bracket. Use <strong style={{color:"#ffd700"}}>Force Advance</strong> anytime to manually pick a winner and keep the event moving.
       </div>
 
+      {/* ── ANNOUNCEMENTS ── */}
+      <div style={{background:"#111",border:"1px solid #ff980033",borderRadius:12,overflow:"hidden",marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"#0d0900",borderBottom:"1px solid #1a1a1a"}}>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:"#ff9800",minWidth:28}}>📢</div>
+          <div>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,color:"#ff9800"}}>SEND ANNOUNCEMENT</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Pops up live on Judge, Emcee and Attendee screens</div>
+          </div>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
+            {QUICK_ANNOUNCEMENTS.map(q=>(
+              <button key={q.label} className="btn"
+                style={{fontSize:10,padding:"6px 12px",background:"#1a0e00",color:"#ff9800",border:"1px solid #ff980044"}}
+                onClick={()=>sendNotification(q.msg, q.round)}
+                disabled={notifSending}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <input className="inp" placeholder="Or type a custom announcement…" value={notifMsg}
+              onChange={e=>setNotifMsg(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&sendNotification(notifMsg,notifRound)}
+              style={{flex:1,minWidth:200}}/>
+            <select className="inp" value={notifRound} onChange={e=>setNotifRound(e.target.value)}
+              style={{width:"auto",padding:"9px 32px 9px 11px"}}>
+              <option value="">No round tag</option>
+              {allRounds.map(r=><option key={r}>{r}</option>)}
+            </select>
+            <button className="btn" style={{background:"#ff9800",color:"#000",fontSize:12,padding:"9px 18px"}}
+              onClick={()=>sendNotification(notifMsg,notifRound)} disabled={notifSending||!notifMsg.trim()}>
+              {notifSending?<Spinner/>:"SEND →"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ── STEP 1: PRELIMS ── */}
       <div style={{background:"#111",border:`1px solid ${prelimDone?"#00c85344":"#1e1e1e"}`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:prelimDone?"#0a1e0a":"#0d0d0d",borderBottom:"1px solid #1a1a1a"}}>
@@ -1526,16 +1823,10 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
 
               <div style={{background:"#0a0a0a",border:"1px solid #1e1e1e",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:6}}>HOW MANY ADVANCE TO KNOCKOUT?</div>
-                {totalIn>0&&(
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#666",marginBottom:10,padding:"6px 10px",background:"#0a0a0a",borderRadius:6,border:"1px solid #181818"}}>
-                    {totalIn>35
-                      ?<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max starting bracket: <strong style={{color:col.primary}}>Top 32</strong> (or smaller)</>
-                      :totalIn>=25
-                      ?<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max starting bracket: <strong style={{color:col.primary}}>Top 16</strong> (or smaller)</>
-                      :<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max bracket: <strong style={{color:col.primary}}>{maxAllowedBracket}</strong></>
-                    }
-                  </div>
-                )}
+                {totalIn>0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",marginBottom:10,padding:"5px 10px",background:"#0a0a0a",borderRadius:6,border:"1px solid #161616"}}>
+                  📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max bracket allowed: <strong style={{color:col.primary}}>Top {maxAllowedBracket}</strong>
+                  {totalIn>35?" (35+ → max Top 32)":totalIn>=25?" (25–35 → max Top 16)":""}
+                </div>}
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
                   {quickOpts.map(n=>(
                     <button key={n} onClick={()=>{setAdvanceN(String(n));setConfirmed(false);}}
@@ -1566,31 +1857,25 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
                 {confirmed&&activeN&&(
                   <div style={{marginTop:8}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:8}}>
-                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
-                        ✓ Top <strong>{activeN}</strong> confirmed · Bracket running
-                      </div>
-                      <button className="btn" style={{background:"#1a1a1a",color:"#555",border:"1px solid #333",fontSize:11}}
-                        onClick={()=>setConfirmed(false)}>
-                        ✎ CHANGE
-                      </button>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>✓ Top <strong>{activeN}</strong> confirmed · Bracket running</div>
+                      <button className="btn" style={{background:"#1a1a1a",color:"#555",border:"1px solid #333",fontSize:11}} onClick={()=>setConfirmed(false)}>✎ CHANGE</button>
                     </div>
                     <div style={{background:"#001a0a",border:"1px solid #00c85333",borderRadius:8,padding:"8px 12px",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00c853"}}>
-                      🔒 Prelim scoring is now locked. Knockout rounds use name card judging only.
+                      🔒 Prelim scoring locked. Knockout rounds use name card judging only.
                     </div>
                   </div>
                 )}
                 {advanceN&&bracketTooLarge&&(
                   <div style={{background:"#1a0000",border:"1px solid #ff4d4d44",borderRadius:8,padding:"10px 14px",marginTop:8}}>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff4d4d",letterSpacing:2,marginBottom:4}}>⛔ BRACKET TOO LARGE</div>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff4d4d",letterSpacing:2,marginBottom:3}}>⛔ BRACKET TOO LARGE</div>
                     <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#cc4444"}}>
-                      With <strong style={{color:"#fff"}}>{totalIn}</strong> checked-in dancers, the maximum starting bracket is <strong style={{color:"#fff"}}>Top {maxAllowedBracket}</strong>.
-                      {totalIn>35?" (35+ dancers → max Top 32)":totalIn>=25?" (25–35 dancers → max Top 16)":" (< 25 dancers → size must fit participant count)"}
+                      With <strong style={{color:"#fff"}}>{totalIn}</strong> dancers, the maximum starting bracket is <strong style={{color:"#fff"}}>Top {maxAllowedBracket}</strong>.
                     </div>
                   </div>
                 )}
                 {advanceN&&!validN&&!bracketTooLarge&&!isNaN(parsed)&&(
                   <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d",marginTop:6}}>
-                    Must be between 2 and {Math.min(totalIn, maxAllowedBracket)}
+                    Must be between 2 and {Math.min(totalIn,maxAllowedBracket)}
                   </div>
                 )}
               </div>
@@ -1706,6 +1991,7 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
         if(finalsStatus!=="done")return null;
         const finalsSeed=getSeedListForRound(finalsRound);
         const finalsBattles=buildRoundBattlesFixed(finalsRound,finalsSeed);
+        if(!finalsBattles.length)return null;
         const champBattles=finalsBattles.filter(b=>{
           const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===b.match_index);
           return resolveWithForce(finalsRound,b.match_index,decs).status==="decided";
@@ -1913,12 +2199,16 @@ function Dashboard({ event, onBack, showToast }) {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:52,letterSpacing:5,lineHeight:1,color:"#fff"}}>{event.name}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>DanBuzz · {event.city} · {event.date}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>DanBuzz · {event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}</div>
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-            <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-              {rounds.map(r=><option key={r}>{r}</option>)}
-            </select>
+            {rounds.length>0?(
+              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+                {rounds.map(r=><option key={r}>{r}</option>)}
+              </select>
+            ):(
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",padding:"7px 12px",background:"#111",borderRadius:8,border:"1px solid #222"}}>Knockout not started yet</div>
+            )}
             <button className="btn" style={{background:"#111",color:"#777",border:"1px solid #2a2a2a",fontSize:11}} onClick={()=>setOverlayActive(true)}>⬛ STREAM</button>
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← LOGOUT</button>
             <button className="btn" style={{background:"#1a0a0a",color:"#ff4d4d",border:"1px solid #ff4d4d33",fontSize:11}} onClick={()=>setShowConfirm(true)}>END EVENT</button>
@@ -2097,7 +2387,7 @@ export default function App() {
   const [screen,setScreen]=useState("loading");
   const [activeEvent,setActiveEvent]=useState(null);
   const [judgeData,setJudgeData]=useState(null);
-  const [viewerData,setViewerData]=useState(null);
+  const [attendeeData,setViewerData]=useState(null);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
 
@@ -2115,14 +2405,16 @@ export default function App() {
     <div style={{fontFamily:"'Bebas Neue',sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
       <style>{CSS}</style>
       <Toast toast={toast}/>
-      {screen==="landing"         &&<LandingScreen onAdminLogin={()=>setScreen("adminLogin")} onOrgLogin={()=>setScreen("orgLogin")} onJudgeLogin={()=>setScreen("judgeLogin")} onViewerLogin={()=>setScreen("viewerLogin")}/>}
+      {screen==="landing"         &&<LandingScreen onAdminLogin={()=>setScreen("adminLogin")} onOrgLogin={()=>setScreen("orgLogin")} onJudgeLogin={()=>setScreen("judgeLogin")} onViewerLogin={()=>setScreen("attendeeLogin")} onEmceeLogin={()=>setScreen("emceeLogin")}/>}
       {screen==="adminLogin"      &&<AdminLoginScreen onBack={()=>setScreen("landing")} onLogin={()=>setScreen("adminDashboard")} showToast={showToast}/>}
       {screen==="adminDashboard"  &&<AdminDashboard onBack={handleAdminLogout} showToast={showToast}/>}
       {screen==="orgLogin"        &&<OrgLoginScreen onBack={()=>setScreen("landing")} onLogin={(ev)=>{setActiveEvent(ev);setScreen("dashboard");}} showToast={showToast}/>}
       {screen==="judgeLogin"      &&<JudgeLoginScreen onBack={()=>setScreen("landing")} onLogin={({judgeCode,event})=>{setJudgeData(judgeCode);setActiveEvent(event);setScreen("judgeDashboard");}} showToast={showToast}/>}
-      {screen==="viewerLogin"     &&<ViewerLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name,role})=>{setActiveEvent(event);setViewerData({name,role});setScreen("viewerDashboard");}} showToast={showToast}/>}
+      {screen==="attendeeLogin"     &&<AttendeeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name,role})=>{setActiveEvent(event);setViewerData({name,role});setScreen("attendeeDashboard");}} showToast={showToast}/>}
       {screen==="judgeDashboard"  &&judgeData&&activeEvent&&<JudgeDashboard judgeCode={judgeData} event={activeEvent} onBack={()=>{setJudgeData(null);setActiveEvent(null);setScreen("landing");}} showToast={showToast}/>}
-      {screen==="viewerDashboard" &&viewerData&&activeEvent&&<ViewerDashboard event={activeEvent} viewerName={viewerData.name} onBack={()=>{setViewerData(null);setActiveEvent(null);setScreen("landing");}}/>}
+      {screen==="attendeeDashboard"&&viewerData&&activeEvent&&<AttendeeDashboard event={activeEvent} attendeeName={viewerData.name} onBack={()=>{setViewerData(null);setActiveEvent(null);setScreen("landing");}}/>}
+      {screen==="emceeLogin"      &&<EmceeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name})=>{setActiveEvent(event);setEmceeData({name});setScreen("emceeDashboard");}} showToast={showToast}/>}
+      {screen==="emceeDashboard"  &&emceeData&&activeEvent&&<EmceeDashboard event={activeEvent} emceeName={emceeData.name} onBack={()=>{setEmceeData(null);setActiveEvent(null);setScreen("landing");}}/>}
       {screen==="dashboard"       &&activeEvent&&<Dashboard event={activeEvent} onBack={()=>{setActiveEvent(null);setScreen("landing");}} showToast={showToast}/>}
     </div>
   );
