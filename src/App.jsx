@@ -46,24 +46,6 @@ const genJudgeCodes = (prefix, categories, judgeCounts={}) => {
   return codes;
 };
 
-// Given the number of participants and the list of configured knockout rounds,
-// returns the first round that fits them — e.g., 9 participants → Top 8 (not Top 32).
-// The host can still override this with the "Force Advance" N picker.
-const getSmartFirstRound = (participantCount, knockoutRounds) => {
-  if (!participantCount || !knockoutRounds?.length) return knockoutRounds?.[0] || null;
-  // Find the smallest round whose limit is >= participantCount — that's the entry point.
-  // e.g., 9 participants: Top 8 (limit 8) is the first round where ≤8 fit cleanly.
-  // We want the first round where limit >= participantCount OR the first round overall.
-  // Actually: we want the smallest round that is still large enough to hold them.
-  // Strategy: the entry round limit should be >= participantCount if possible, else the largest.
-  const sorted = [...knockoutRounds].sort((a, b) => (ROUND_LIMIT[a] ?? 0) - (ROUND_LIMIT[b] ?? 0));
-  // First round whose limit >= count
-  const fit = sorted.find(r => (ROUND_LIMIT[r] ?? 0) >= participantCount);
-  if (fit) return fit;
-  // If no round fits (count > all limits), use the largest round
-  return sorted[sorted.length - 1];
-};
-
 const calcAvgScore = (arr=[]) => {
   if (!arr.length) return 0;
   return Math.round((arr.reduce((a,b)=>a+b,0)/arr.length)*10);
@@ -93,28 +75,6 @@ const detectBias = (scoreMap={}) => {
 //                 Ties are allowed any number of times — tie_round keeps incrementing.
 //
 // ─────────────────────────────────────────────────────────────────
-
-// Resolve a battle in score_only mode: compare sum of round-scoped scores.
-// scoreMap: { participantId: { judgeKey: score } }
-// roundName used to filter round-scoped keys.
-const resolveScoreBattle = (battle, scoreMap, roundName) => {
-  const roundSlug = roundName.replace(/\s+/g,"");
-  const getScore = (pid) => {
-    const m = scoreMap[pid] || {};
-    return Object.entries(m)
-      .filter(([k]) => k.endsWith(`-${roundSlug}`))
-      .reduce((sum,[,v])=>sum+v, 0);
-  };
-  const fighters = [battle.p1, battle.p2, ...(battle.p3?[battle.p3]:[])];
-  if (!fighters.length) return { status:"pending" };
-  // Need at least 1 score per fighter to consider it decided
-  const hasScores = fighters.every(p=>Object.keys(scoreMap[p.id]||{}).some(k=>k.endsWith(`-${roundSlug}`)));
-  if (!hasScores) return { status:"pending" };
-  const scores = fighters.map(p=>({p, s:getScore(p.id)}));
-  scores.sort((a,b)=>b.s-a.s);
-  if (scores[0].s === scores[1].s) return { status:"tied", tie_round:0 };
-  return { status:"decided", winner_id:scores[0].p.id, winner_name:scores[0].p.name, tie_round:0 };
-};
 
 // Resolve a single battle from its judge decisions.
 // Supports 2-way AND 3-way battles (p3_id present on decisions).
@@ -192,30 +152,13 @@ const buildBattlesFromSeeds = (seededList, roundName) => {
 // that exits a given round (used to seed the NEXT round).
 // Returns participants in winner-rank order: winner of match 0 = rank 1, match 1 = rank 2...
 // Works for both 2-way and 3-way battles — each battle always produces exactly 1 winner.
-const getWinnersOfRound = (roundName, allDecisions, participantMap, judgingMode, scoreMap) => {
+const getWinnersOfRound = (roundName, allDecisions, participantMap) => {
   const roundDecs = allDecisions.filter(d => d.round === roundName);
   const matchIndices = [...new Set(roundDecs.map(d => d.match_index))].sort((a,b)=>a-b);
-  // For score_only we need to figure out battles from decisions or scoreMap
-  // We only call this for subsequent rounds, so we need battles list too.
-  // Actually battles are derived from seeds — we just resolve them.
-  // This function needs the battle list to resolve. It's called from buildRoundBattles.
-  // We'll pass scoreMap and use it when mode is score_only.
   const winners = [];
   for (const mi of matchIndices) {
     const decs = roundDecs.filter(d => d.match_index === mi);
-    let result;
-    if (judgingMode === "score_only" && scoreMap) {
-      // Reconstruct battle shape from decisions to get fighter ids
-      const anyDec = decs[0];
-      if (anyDec) {
-        const fakeBattle = { p1:{id:anyDec.p1_id,name:anyDec.p1_name}, p2:{id:anyDec.p2_id,name:anyDec.p2_name}, ...(anyDec.p3_id?{p3:{id:anyDec.p3_id,name:anyDec.p3_name}}:{}) };
-        result = resolveScoreBattle(fakeBattle, scoreMap, roundName);
-      } else {
-        result = { status:"pending" };
-      }
-    } else {
-      result = resolveBattle(decs);
-    }
+    const result = resolveBattle(decs);
     if (result.status === "decided" && result.winner_id) {
       const p = participantMap[result.winner_id];
       if (p) winners.push(p);
@@ -227,7 +170,7 @@ const getWinnersOfRound = (roundName, allDecisions, participantMap, judgingMode,
 // Build the battles for any round, accounting for progressive seeding.
 // For the first knockout round → seed from prelim ranking.
 // For subsequent rounds → seed from winners of the previous round.
-const buildRoundBattles = (roundName, eventRounds, prelimRanked, allDecisions, participantMap, judgingMode, scoreMap) => {
+const buildRoundBattles = (roundName, eventRounds, prelimRanked, allDecisions, participantMap) => {
   const knockoutRounds = getKnockoutRounds(eventRounds);
   const roundIndex = knockoutRounds.indexOf(roundName);
   if (roundIndex < 0) return [];
@@ -239,7 +182,7 @@ const buildRoundBattles = (roundName, eventRounds, prelimRanked, allDecisions, p
   } else {
     // Subsequent rounds — seed from winners of the previous round
     const prevRound = knockoutRounds[roundIndex - 1];
-    seededList = getWinnersOfRound(prevRound, allDecisions, participantMap, judgingMode, scoreMap);
+    seededList = getWinnersOfRound(prevRound, allDecisions, participantMap);
   }
   return buildBattlesFromSeeds(seededList, roundName);
 };
@@ -415,7 +358,6 @@ function AdminCreateEvent({ showToast, onCreated }) {
   const [customInput,setCustomInput]=useState("");
   const [judgeCounts,setJudgeCounts]=useState({});
   const [selectedRounds,setSelectedRounds]=useState(["Top 16","Top 8","Top 4","Finals"]);
-  const [judgingMode,setJudgingMode]=useState("prelim_plus_card"); // "score_only" | "prelim_plus_card"
   const [loading,setLoading]=useState(false);
   const [createdEvent,setCreatedEvent]=useState(null);
   const [copied,setCopied]=useState(null);
@@ -438,8 +380,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
       name:form.name.trim(),city:form.city.trim(),date:form.date,
       org_code:orgCode,viewer_code:viewerCode,categories,
       organizer_name:form.organizer.trim()||null,
-      judge_counts:judgeCounts,rounds:orderedRounds,
-      judging_mode:judgingMode
+      judge_counts:judgeCounts,rounds:orderedRounds
     }).select().single();
     if(evErr){showToast("Failed: "+evErr.message,"error");setLoading(false);return;}
     await supabase.from("judge_codes").insert(jCodes.map(j=>({event_id:ev.id,code:j.code,category:j.category,slot:j.slot})));
@@ -523,37 +464,6 @@ function AdminCreateEvent({ showToast, onCreated }) {
         </div>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444",marginBottom:14}}>
           Flow: <span style={{color:"#ffd700"}}>Prelims (scores) → {ALL_POST_PRELIM_ROUNDS.filter(r=>selectedRounds.includes(r)).join(" → ")||"—"} (1v1 battles)</span>
-        </div>
-      </div>
-
-      {/* Judging Mode */}
-      <div style={{margin:"20px 0 0"}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>JUDGING SYSTEM <span style={{color:"#ff4d4d"}}>*</span></div>
-        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:8}}>
-          {[
-            {
-              key:"prelim_plus_card",
-              label:"A) Prelim Score + Card",
-              desc:"Prelims: judges score each dancer 1–10. After prelims, knockout uses Name Card (judge picks winner per battle). Prelim score is used only for seeding.",
-            },
-            {
-              key:"score_only",
-              label:"B) Score Only (every round)",
-              desc:"Every round — including knockouts — is judged by score (1–10). Scores are reset fresh each round and do NOT carry over. Winner of each 1v1 battle = highest score.",
-            },
-          ].map(opt=>{
-            const active=judgingMode===opt.key;
-            return (
-              <div key={opt.key} onClick={()=>setJudgingMode(opt.key)}
-                style={{background:active?"#0d1a0d":"#0f0f0f",border:`1px solid ${active?"#00c85366":"#1e1e1e"}`,borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"all .15s"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
-                  <div style={{width:14,height:14,borderRadius:"50%",border:`2px solid ${active?"#00c853":"#444"}`,background:active?"#00c853":"transparent",transition:"all .15s",flexShrink:0}}/>
-                  <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:active?"#00c853":"#aaa",letterSpacing:1}}>{opt.label}</span>
-                </div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",paddingLeft:24}}>{opt.desc}</div>
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -748,9 +658,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const categories = event.categories||[];
   const rounds     = event.rounds||["Prelims","Finals"];
   const myCategory = judgeCode.category;
-  const myKey      = `${myCategory}-J${judgeCode.slot}`;
-  const col        = getCatColor(categories, myCategory);
-  const judgingMode = event.judging_mode || "prelim_plus_card"; // "score_only" | "prelim_plus_card"
+  const myKey        = `${myCategory}-J${judgeCode.slot}`;
+  const col          = getCatColor(categories, myCategory);
 
   const [tab,setTab]               = useState("scoring");
   const [currentRound,setCurrentRound] = useState(rounds[0]||"Prelims");
@@ -763,10 +672,9 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   // UI state: per match_index, what the judge has selected but not yet submitted
   const [battleChoices,setBattleChoices] = useState({});
 
-  const isPrelim = currentRound === "Prelims";
-  // In "score_only" mode every round uses score judging (1–10).
-  // In "prelim_plus_card" mode only Prelims uses scores; knockout uses Name Card.
-  const isScoreRound = judgingMode === "score_only" ? true : isPrelim;
+  const isPrelim    = currentRound === "Prelims";
+  // Prelims = score round; all knockout rounds = name card voting
+  const isScoreRound = isPrelim;
 
   const loadAll = async () => {
     setLoading(true);
@@ -817,13 +725,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
     return vals.length ? vals.reduce((a,b)=>a+b,0) : 0;
   },[scoreMap]);
   const getScore   = useCallback((pid)=>getTotalScore(pid),[getTotalScore]);
-  const getMyScore = useCallback((pid)=>{
-    if (!isPrelim && judgingMode==="score_only") {
-      const rKey = `${myKey}-${currentRound.replace(/\s+/g,"")}`;
-      return scoreMap[pid]?.[rKey];
-    }
-    return scoreMap[pid]?.[myKey];
-  },[scoreMap,myKey,isPrelim,judgingMode,currentRound]);
+  const getMyScore = useCallback((pid)=>scoreMap[pid]?.[myKey],[scoreMap,myKey]);
   const checkedIn  = useMemo(()=>participants.filter(p=>p.checked_in),[participants]);
   const prelimRanked = useMemo(()=>{
     return [...checkedIn].sort((a,b)=>{
@@ -846,8 +748,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   // Build current round's battles using progressive seeding
   const currentBattles = useMemo(()=>{
     if(isPrelim) return [];
-    return buildRoundBattles(currentRound, rounds, prelimRanked, battles, participantMap, judgingMode, scoreMap);
-  },[isPrelim, currentRound, rounds, prelimRanked, battles, participantMap, judgingMode, scoreMap]);
+    return buildRoundBattles(currentRound, rounds, prelimRanked, battles, participantMap);
+  },[isPrelim, currentRound, rounds, prelimRanked, battles, participantMap]);
 
   // Get my existing decision for a battle at the current active tie_round
   const getBattleDecisions = (mi) => battles.filter(b=>b.round===currentRound&&b.match_index===mi);
@@ -856,16 +758,15 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const submitPrelimScore=async(pid)=>{
     const val=parseFloat(scoreInputs[pid]);
     if(isNaN(val)||val<1||val>10)return showToast("Score must be 1–10","error");
-    // In score_only knockout rounds, key includes the round so scores are round-scoped
-    const effectiveKey = (!isPrelim && judgingMode==="score_only") ? `${myKey}-${currentRound.replace(/\s+/g,"")}` : myKey;
-    const existing=scores.find(s=>s.participant_id===pid&&s.judge_key===effectiveKey&&s.event_id===event.id);
+    const existing=scores.find(s=>s.participant_id===pid&&s.judge_key===myKey&&s.event_id===event.id);
     let error;
     if(existing){
       ({error}=await supabase.from("scores").update({score:val}).eq("id",existing.id));
     } else {
-      ({error}=await supabase.from("scores").insert({participant_id:pid,event_id:event.id,category:myCategory,judge_key:effectiveKey,score:val}));
+      ({error}=await supabase.from("scores").insert({participant_id:pid,event_id:event.id,category:myCategory,judge_key:myKey,score:val}));
+      // If category column doesn't exist in schema, retry without it
       if(error&&error.message&&error.message.includes("category")){
-        ({error}=await supabase.from("scores").insert({participant_id:pid,event_id:event.id,judge_key:effectiveKey,score:val}));
+        ({error}=await supabase.from("scores").insert({participant_id:pid,event_id:event.id,judge_key:myKey,score:val}));
       }
     }
     if(error)return showToast("Score failed: "+error.message,"error");
@@ -905,7 +806,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
               <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#00c853"}}/>
               <div>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,color:col.primary}}>{judgeCode.judge_name}</div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Judge {judgeCode.slot} · {myCategory} · {isScoreRound?(isPrelim?"Prelims (score each dancer)":"Score round (score each battle)"):"Knockout (choose winner per battle)"}</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Judge {judgeCode.slot} · {myCategory} · {isScoreRound?"Prelims — score each dancer 1–10":"Knockout — pick a winner by name card"}</div>
               </div>
             </div>
           </div>
@@ -925,18 +826,18 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
 
-        {/* ── SCORING (prelims always; knockout rounds in score_only mode) ── */}
+        {/* ── PRELIM SCORING ── */}
         {tab==="scoring"&&isScoreRound&&(
           <div className="slide">
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>{isPrelim?"PRELIMS":currentRound} · {myCategory} · SCORE EACH {isPrelim?"DANCER":"BATTLE PARTICIPANT"}</div>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIMS · {myCategory} · SCORE EACH DANCER</div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:6}}>
-              Scoring as <span style={{color:col.primary}}>{judgeCode.judge_name}</span>. {isPrelim?"Give each dancer a score from 1–10 based on their solo performance.":"Give each battle participant a score from 1–10. Scores are fresh for this round only — they do not carry over."}
+              Scoring as <span style={{color:col.primary}}>{judgeCode.judge_name}</span>. Give each dancer a score from 1–10 based on their solo performance.
             </div>
             <div style={{background:"#1a1a0a",border:"1px solid #ffd70033",borderRadius:8,padding:"8px 14px",marginBottom:18,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>
-              {isPrelim?"⚡ Total score from all judges in this category determines prelim ranking and knockout seeding.":"⚡ Scores are reset each round. Higher score wins the battle. Does not affect future rounds."}
+              ⚡ Scores from all judges determine prelim ranking and knockout seeding.
             </div>
             {checkedIn.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#333"}}>No checked-in participants yet</div>}
-            {(isPrelim?checkedIn:currentBattles.flatMap(b=>[b.p1,b.p2,...(b.p3?[b.p3]:[])])).map(p=>{
+            {checkedIn.map(p=>{
               const myScore=getMyScore(p.id);
               return (
                 <div key={p.id} className="card" style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",border:myScore!==undefined?`1px solid ${col.border}`:"1px solid #1e1e1e"}}>
@@ -955,7 +856,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
           </div>
         )}
 
-        {/* ── KNOCKOUT BATTLE JUDGING (name card — only in prelim_plus_card mode) ── */}
+        {/* ── KNOCKOUT BATTLE JUDGING (card mode rounds only) ── */}
         {tab==="scoring"&&!isScoreRound&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>{currentRound} · {myCategory} · PICK YOUR WINNER</div>
@@ -1067,6 +968,35 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             })}
           </div>
         )}
+
+        {/* ── CHAMPION BANNER ── show when Finals is decided ── */}
+        {(()=>{
+          if(currentRound!=="Finals"||tab!=="scoring")return null;
+          const finalsBattles=currentBattles;
+          if(!finalsBattles.length)return null;
+          const allResolved=finalsBattles.every(b=>{
+            const decs=getBattleDecisions(b.match_index);
+            return resolveBattle(decs).status==="decided";
+          });
+          if(!allResolved)return null;
+          // All Finals battles decided — show champion for each
+          return (
+            <div style={{marginBottom:20}}>
+              {finalsBattles.map(b=>{
+                const decs=getBattleDecisions(b.match_index);
+                const res=resolveBattle(decs);
+                if(res.status!=="decided")return null;
+                return (
+                  <div key={b.match_index} style={{background:"linear-gradient(135deg,#1a1200,#0a0800)",border:`2px solid ${col.primary}`,borderRadius:16,padding:"28px 24px",textAlign:"center",marginBottom:12}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:5,color:col.primary,marginBottom:8}}>🏆 CHAMPION · {myCategory}</div>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:52,color:col.primary,lineHeight:1,marginBottom:6}}>{res.winner_name}</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#888"}}>Winner of the Finals · {event.name}</div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* ── LEADERBOARD ── */}
         {tab==="leaderboard"&&(
@@ -1209,9 +1139,8 @@ function AttendeeTab({ event, col, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // ORGANIZER: Bracket view — reads battle_decisions, shows majority winner
 // ─────────────────────────────────────────────────────────────────
-function BracketTab({ event, activeCat, col, prelimRanked, participantMap, scoreMap, showToast }) {
+function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showToast }) {
   const rounds = (event.rounds||[]).filter(r=>r!=="Prelims");
-  const judgingMode = event.judging_mode || "prelim_plus_card";
 
   const [battles,setBattles] = useState([]);
   const [loading,setLoading] = useState(true);
@@ -1240,17 +1169,16 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, score
       {loading?<Spinner/>:(
         <div style={{display:"flex",gap:24,overflowX:"auto",paddingBottom:20}}>
           {rounds.map(roundName=>{
-            const roundBattles = buildRoundBattles(roundName, event.rounds||[], prelimRanked, battles, participantMap, judgingMode, scoreMap);
+            const roundBattles = buildRoundBattles(roundName, event.rounds||[], prelimRanked, battles, participantMap);
             const prevRoundDone = (() => {
               const ko = getKnockoutRounds(event.rounds||[]);
               const idx = ko.indexOf(roundName);
               if(idx===0) return true; // first round always available once prelims done
               const prev = ko[idx-1];
-              const prevBattles = buildRoundBattles(prev, event.rounds||[], prelimRanked, battles, participantMap, judgingMode, scoreMap);
+              const prevBattles = buildRoundBattles(prev, event.rounds||[], prelimRanked, battles, participantMap);
               return prevBattles.length > 0 && prevBattles.every(b=>{
                 const decs = battles.filter(d=>d.round===prev&&d.match_index===b.match_index);
-                const res = judgingMode==="score_only" ? resolveScoreBattle(b, scoreMap, prev) : resolveBattle(decs);
-                return res.status==="decided";
+                return resolveBattle(decs).status==="decided";
               });
             })();
             return (
@@ -1264,8 +1192,8 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, score
                   const fighters = [battle.p1, battle.p2, ...(battle.p3?[battle.p3]:[])];
                   const is3way = !!battle.p3;
                   const decs   = battles.filter(b=>b.round===roundName&&b.match_index===battle.match_index);
-                  const result = judgingMode==="score_only" ? resolveScoreBattle(battle, scoreMap, roundName) : resolveBattle(decs);
-                  const judgeCount = [...new Set(decs.filter(d=>(d.tie_round??0)===(result.tie_round??0)).map(d=>d.judge_key))].length;
+                  const result = resolveBattle(decs);
+                  const judgeCount = [...new Set(decs.filter(d=>(d.tie_round??0)===result.tie_round).map(d=>d.judge_key))].length;
                   const isTied = result.status === "tied";
                   const isDecided = result.status === "decided";
                   return (
@@ -1349,7 +1277,7 @@ function ViewerDashboard({ event, viewerName, onBack }) {
     return a.name.localeCompare(b.name);
   });
   const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
-  const currentBattles=isPrelim?[]:buildRoundBattles(currentRound, rounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap, event.judging_mode||"prelim_plus_card", scoreMap);
+  const currentBattles=isPrelim?[]:buildRoundBattles(currentRound, rounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap);
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080808"}}><Spinner/></div>;
 
@@ -1450,36 +1378,41 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
 
   const totalIn = checkedIn.length;
   const parsed  = parseInt(advanceN);
-  const validN  = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn;
+
+  // ── BRACKET SIZE VALIDATION (per spec) ──────────────────────────
+  // Derive the MAXIMUM allowed bracket the host can pick, based on
+  // how many dancers performed in Prelims.
+  //   >35 performers  → host can start at Top 32 or lower
+  //   25-35           → max Top 16
+  //   16-24           → max Top 16  (fits within)
+  //   <16             → host picks an appropriate size, no larger than totalIn
+  const getMaxBracket = (n) => {
+    if (n > 35) return 32;
+    if (n >= 25) return 16;
+    if (n >= 16) return 16;
+    return n; // allow any size up to totalIn for very small groups
+  };
+  const maxAllowedBracket = totalIn > 0 ? getMaxBracket(totalIn) : 0;
+
+  // Valid = at least 2, no more than totalIn, AND no more than maxAllowedBracket
+  const validN = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn && parsed <= maxAllowedBracket;
+
+  // Show bracket-too-large error specifically when user tries to pick > maxAllowedBracket
+  const bracketTooLarge = !isNaN(parsed) && parsed > maxAllowedBracket && parsed <= totalIn;
+
   const activeN = confirmed && validN ? parsed : null;
 
-  // Smart suggestion: best first round for the participant count
-  const smartSuggestedN = useMemo(()=>{
-    if (!totalIn || !knockoutRounds.length) return null;
-    // Find the largest power-of-2-ish round limit that is <= totalIn
-    const sortedLimits = knockoutRounds
-      .map(r=>ROUND_LIMIT[r]??0)
-      .filter(l=>l>=2&&l<=totalIn)
-      .sort((a,b)=>b-a);
-    return sortedLimits[0] || null;
-  },[totalIn, knockoutRounds]);
-
-  // Quick pick buttons — powers of 2 that fit, plus the exact count if not already listed
-  const quickOpts = [2,4,8,16,32,64].filter(n => n <= totalIn);
+  // Quick pick buttons — powers of 2 that are ≤ maxAllowedBracket AND ≤ totalIn
+  const quickOpts = [2,4,8,16,32].filter(n => n <= totalIn && n <= maxAllowedBracket);
 
   const advancing  = activeN ? prelimRanked.slice(0, activeN) : [];
 
-  // Active rounds: starting from the first round that fits activeN, up through Finals.
-  // e.g., if activeN=9 → first round should be Top 8 (not Top 32).
+  // Active rounds: any knockout round whose limit fits within activeN
   const activeRounds = activeN
-    ? (() => {
-        // Find the first knockout round that fits (smallest limit >= activeN, or just largest)
-        const smartFirst = getSmartFirstRound(activeN, knockoutRounds);
-        if (!smartFirst) return [];
-        const firstIdx = knockoutRounds.indexOf(smartFirst);
-        // Include from that round onwards (Top 8 → Top 4 → Finals etc.)
-        return knockoutRounds.slice(firstIdx);
-      })()
+    ? knockoutRounds.filter(r => {
+        const limit = ROUND_LIMIT[r] ?? 0;
+        return limit >= 2 && limit <= activeN;
+      })
     : knockoutRounds;
 
   // Build battles using shared buildBattlesFromSeeds (handles odd → 3-way last battle)
@@ -1592,19 +1525,15 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
               </div>
 
               <div style={{background:"#0a0a0a",border:"1px solid #1e1e1e",borderRadius:10,padding:"14px 16px"}}>
-                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:10}}>HOW MANY ADVANCE TO KNOCKOUT?</div>
-                {smartSuggestedN && !confirmed && (
-                  <div style={{background:"#0d1a0a",border:"1px solid #00c85344",borderRadius:8,padding:"8px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                    <div style={{flex:1}}>
-                      <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:"#00c853",letterSpacing:2}}>⚡ SMART SUGGESTION: </span>
-                      <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#aaa"}}>
-                        {totalIn} participants → start at <strong style={{color:"#00c853"}}>{getSmartFirstRound(smartSuggestedN, knockoutRounds)}</strong> (Top {smartSuggestedN})
-                      </span>
-                    </div>
-                    <button style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,padding:"5px 13px",borderRadius:6,border:"1px solid #00c85366",background:"#00c85322",color:"#00c853",cursor:"pointer"}}
-                      onClick={()=>{setAdvanceN(String(smartSuggestedN));setConfirmed(false);}}>
-                      USE THIS →
-                    </button>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:6}}>HOW MANY ADVANCE TO KNOCKOUT?</div>
+                {totalIn>0&&(
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#666",marginBottom:10,padding:"6px 10px",background:"#0a0a0a",borderRadius:6,border:"1px solid #181818"}}>
+                    {totalIn>35
+                      ?<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max starting bracket: <strong style={{color:col.primary}}>Top 32</strong> (or smaller)</>
+                      :totalIn>=25
+                      ?<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max starting bracket: <strong style={{color:col.primary}}>Top 16</strong> (or smaller)</>
+                      :<>📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Max bracket: <strong style={{color:col.primary}}>{maxAllowedBracket}</strong></>
+                    }
                   </div>
                 )}
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
@@ -1625,28 +1554,43 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
                   <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
                     <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888",flex:1}}>
                       Top <strong style={{color:col.primary}}>{parsed}</strong> advance · <strong style={{color:"#ff4d4d"}}>{totalIn-parsed}</strong> eliminated
-                      {activeRounds.length>0&&<span style={{color:"#555"}}> · Entry: <strong style={{color:"#ffd700"}}>{activeRounds[0]}</strong>{activeRounds.length>1?" → "+activeRounds.slice(1).join(" → "):""}</span>}
+                      {activeRounds.length>0&&<span style={{color:"#555"}}> · Rounds: {activeRounds.join(" → ")}</span>}
                     </div>
                     <button className="btn" style={{background:col.primary,color:"#000",fontSize:12,padding:"9px 22px"}}
+                      disabled={bracketTooLarge}
                       onClick={()=>setConfirmed(true)}>
                       ✓ CONFIRM & START BRACKET
                     </button>
                   </div>
                 )}
                 {confirmed&&activeN&&(
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,flexWrap:"wrap",gap:8}}>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
-                      ✓ Top <strong>{activeN}</strong> confirmed · Bracket running
+                  <div style={{marginTop:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:8}}>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
+                        ✓ Top <strong>{activeN}</strong> confirmed · Bracket running
+                      </div>
+                      <button className="btn" style={{background:"#1a1a1a",color:"#555",border:"1px solid #333",fontSize:11}}
+                        onClick={()=>setConfirmed(false)}>
+                        ✎ CHANGE
+                      </button>
                     </div>
-                    <button className="btn" style={{background:"#1a1a1a",color:"#555",border:"1px solid #333",fontSize:11}}
-                      onClick={()=>setConfirmed(false)}>
-                      ✎ CHANGE
-                    </button>
+                    <div style={{background:"#001a0a",border:"1px solid #00c85333",borderRadius:8,padding:"8px 12px",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00c853"}}>
+                      🔒 Prelim scoring is now locked. Knockout rounds use name card judging only.
+                    </div>
                   </div>
                 )}
-                {advanceN&&!validN&&(
+                {advanceN&&bracketTooLarge&&(
+                  <div style={{background:"#1a0000",border:"1px solid #ff4d4d44",borderRadius:8,padding:"10px 14px",marginTop:8}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff4d4d",letterSpacing:2,marginBottom:4}}>⛔ BRACKET TOO LARGE</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#cc4444"}}>
+                      With <strong style={{color:"#fff"}}>{totalIn}</strong> checked-in dancers, the maximum starting bracket is <strong style={{color:"#fff"}}>Top {maxAllowedBracket}</strong>.
+                      {totalIn>35?" (35+ dancers → max Top 32)":totalIn>=25?" (25–35 dancers → max Top 16)":" (< 25 dancers → size must fit participant count)"}
+                    </div>
+                  </div>
+                )}
+                {advanceN&&!validN&&!bracketTooLarge&&!isNaN(parsed)&&(
                   <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d",marginTop:6}}>
-                    Must be between 2 and {totalIn}
+                    Must be between 2 and {Math.min(totalIn, maxAllowedBracket)}
                   </div>
                 )}
               </div>
@@ -1752,6 +1696,38 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
           </div>
         );
       })}
+
+      {/* ── CHAMPION SCREEN ── */}
+      {(()=>{
+        if(!confirmed||!activeN)return null;
+        const finalsRound=activeRounds[activeRounds.length-1];
+        if(!finalsRound)return null;
+        const finalsStatus=getRoundStatus(finalsRound);
+        if(finalsStatus!=="done")return null;
+        const finalsSeed=getSeedListForRound(finalsRound);
+        const finalsBattles=buildRoundBattlesFixed(finalsRound,finalsSeed);
+        const champBattles=finalsBattles.filter(b=>{
+          const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===b.match_index);
+          return resolveWithForce(finalsRound,b.match_index,decs).status==="decided";
+        });
+        if(!champBattles.length)return null;
+        return (
+          <div style={{background:"linear-gradient(135deg,#1a1200,#0f0a00)",border:`2px solid ${col.primary}`,borderRadius:16,padding:"32px 24px",textAlign:"center",marginBottom:16}}>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:6,color:col.primary,marginBottom:10}}>🏆 CHAMPION · {activeCat}</div>
+            {champBattles.map(b=>{
+              const decs=battles.filter(d=>d.round===finalsRound&&d.match_index===b.match_index);
+              const res=resolveWithForce(finalsRound,b.match_index,decs);
+              const champ=participantMap[res.winner_id];
+              return champ?(
+                <div key={b.match_index}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:64,color:col.primary,lineHeight:1,marginBottom:4}}>{champ.name}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#888"}}>{champ.city} · Winner of {event.name}</div>
+                </div>
+              ):null;
+            })}
+          </div>
+        );
+      })()}
 
       {confirmed&&activeN&&activeRounds.length===0&&(
         <div style={{background:"#1a0a00",border:"1px solid #ff4d4d33",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
@@ -2055,7 +2031,7 @@ function Dashboard({ event, onBack, showToast }) {
           </div>
         )}
 
-        {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} scoreMap={scoreMap} showToast={showToast}/>}
+        {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} showToast={showToast}/>}
 
         {tab==="leaderboard"&&(
           <div className="slide">
