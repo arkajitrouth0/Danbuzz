@@ -278,7 +278,7 @@ function LiveNotifBanner({ notif }) {
 // ─────────────────────────────────────────────────────────────────
 // LANDING
 // ─────────────────────────────────────────────────────────────────
-function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onAttendeeLogin }) {
+function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onViewerLogin, onEmceeLogin }) {
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,textAlign:"center",background:"#080808"}}>
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:64,letterSpacing:6,lineHeight:1}}>DAN<span style={{color:"#ff4d4d"}}>BUZZ</span></div>
@@ -286,7 +286,8 @@ function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onAttendeeLogin
       <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:320}}>
         <button className="btn" style={{background:"#ff4d4d",color:"#000",fontSize:14,padding:"15px"}} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
         <button className="btn" style={{background:"#111",color:"#aaa",border:"1px solid #222",fontSize:13,padding:"14px"}} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
-        <button className="btn" style={{background:"#111",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onAttendeeLogin}>👁 ATTENDEE REGISTRATION / LIVE VIEW</button>
+        <button className="btn" style={{background:"#111",color:"#ff9800",border:"1px solid #ff980033",fontSize:13,padding:"14px"}} onClick={onEmceeLogin}>🎤 EMCEE DASHBOARD</button>
+        <button className="btn" style={{background:"#111",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onViewerLogin}>🎟 ATTENDEE LIVE VIEW</button>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#333",marginTop:4}}>First time as a judge? Judge Login handles registration too.</div>
       </div>
       <div style={{marginTop:52,borderTop:"1px solid #111",paddingTop:20}}>
