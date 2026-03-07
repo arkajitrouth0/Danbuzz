@@ -285,6 +285,7 @@ function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onViewerLogin, 
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#444",letterSpacing:4,marginBottom:52}}>BATTLE MANAGEMENT SYSTEM</div>
       <div style={{display:"flex",flexDirection:"column",gap:14,width:"100%",maxWidth:320}}>
         <button className="btn" style={{background:"#ff4d4d",color:"#000",fontSize:14,padding:"15px"}} onClick={onOrgLogin}>🔑 ORGANIZER LOGIN</button>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#333",marginTop:-6,marginBottom:2}}>Code sent to you by DanBuzz team</div>
         <button className="btn" style={{background:"#111",color:"#aaa",border:"1px solid #222",fontSize:13,padding:"14px"}} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
         <button className="btn" style={{background:"#111",color:"#ff9800",border:"1px solid #ff980033",fontSize:13,padding:"14px"}} onClick={onEmceeLogin}>🎤 EMCEE DASHBOARD</button>
         <button className="btn" style={{background:"#111",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onViewerLogin}>🎟 ATTENDEE LIVE VIEW</button>
@@ -478,6 +479,30 @@ function AdminCreateEvent({ showToast, onCreated }) {
             );
           })}
         </div>
+        {/* ── SEND TO ORGANIZER ── */}
+        <div style={{background:"#0a1a0a",border:"1px solid #00c85333",borderRadius:12,padding:20,marginBottom:16}}>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:3,color:"#00c853",marginBottom:4}}>📤 SEND CODES TO ORGANIZER</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",marginBottom:14}}>Send all codes to the organizer via email or WhatsApp so they can log in and manage the event.</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <a href={"mailto:?subject=Your DanBuzz Event: "+createdEvent.name+"&body=Hi,%0A%0AYour event has been set up on DanBuzz.%0A%0A--- YOUR CODES ---%0A%0AORGANIZER CODE (login to manage your event):%0A"+createdEvent.org_code+"%0A%0AATTENDEE %26 EMCEE CODE (share with emcee and audience):%0A"+createdEvent.viewer_code+"%0A%0AJUDGE CODES:%0A"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("%0A")+"%0A%0ALogin at: "+encodeURIComponent(window.location.origin)+"%0A%0A%E2%80%94 DanBuzz Team"}
+              className="btn" style={{background:"#00c853",color:"#000",fontSize:12,padding:"10px 20px",textDecoration:"none",display:"inline-block"}}>
+              ✉️ SEND VIA EMAIL
+            </a>
+            <a href={"https://wa.me/?text="+encodeURIComponent("*DanBuzz Event: "+createdEvent.name+"*\n\n*ORGANIZER CODE* (login to manage):\n"+createdEvent.org_code+"\n\n*ATTENDEE & EMCEE CODE:*\n"+createdEvent.viewer_code+"\n\n*JUDGE CODES:*\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin)}
+              target="_blank" rel="noopener noreferrer"
+              className="btn" style={{background:"#25D366",color:"#000",fontSize:12,padding:"10px 20px",textDecoration:"none",display:"inline-block"}}>
+              💬 SEND VIA WHATSAPP
+            </a>
+            <button className="btn" style={{background:"#111",color:"#fff",border:"1px solid #2a2a2a",fontSize:12,padding:"10px 20px"}}
+              onClick={()=>{
+                const text="DanBuzz Event: "+createdEvent.name+"\n\nORGANIZER CODE:\n"+createdEvent.org_code+"\n\nATTENDEE & EMCEE CODE:\n"+createdEvent.viewer_code+"\n\nJUDGE CODES:\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin;
+                navigator.clipboard?.writeText(text).catch(()=>{});
+                setCopied("all");setTimeout(()=>setCopied(null),2000);
+              }}>
+              {copied==="all"?"✓ COPIED ALL":"📋 COPY ALL"}
+            </button>
+          </div>
+        </div>
         <button className="btn" style={{background:"#111",color:"#fff",border:"1px solid #2a2a2a",fontSize:12}} onClick={()=>{setCreatedEvent(null);setForm({name:"",start_date:"",end_date:"",city:"",organizer:""});setCategories([]);setJudgeCounts({});setSelectedRounds(["Top 16","Top 8","Top 4","Finals"]);onCreated();}}>← BACK TO ALL EVENTS</button>
       </div>
     );
@@ -575,7 +600,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
 function OrgLoginScreen({ onBack, onLogin, showToast }) {
   const [orgCode,setOrgCode]=useState(""); const [loading,setLoading]=useState(false);
   const handleSubmit=async()=>{
-    if(!orgCode.trim())return showToast("Enter your organizer code!","error");
+    if(!orgCode.trim())return showToast("Enter the organizer code sent to you by DanBuzz!","error");
     setLoading(true);
     const{data,error}=await supabase.from("events").select("*").eq("org_code",orgCode.trim().toUpperCase()).single();
     if(error||!data){showToast("Invalid organizer code!","error");setLoading(false);return;}
@@ -586,7 +611,7 @@ function OrgLoginScreen({ onBack, onLogin, showToast }) {
       <div style={{width:"100%",maxWidth:360}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>ORGANIZER LOGIN</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the organizer code provided by DanBuzz admin.</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the organizer code sent to you by DanBuzz. Check your email or WhatsApp from our team.</div>
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>ORGANIZER CODE</div>
           <input className="inp" placeholder="e.g. ORG-XYZ-1234" value={orgCode} onChange={e=>setOrgCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} style={{letterSpacing:3,fontFamily:"Bebas Neue,sans-serif",fontSize:20}}/>
@@ -605,7 +630,7 @@ function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
   const [phone,setPhone]=useState(""); const [loading,setLoading]=useState(false); const [event,setEvent]=useState(null);
 
   const lookupEvent=async()=>{
-    if(!viewerCode.trim())return showToast("Enter event code!","error");
+    if(!viewerCode.trim())return showToast("Enter the event code sent to you by the organizer!","error");
     setLoading(true);
     const{data,error}=await supabase.from("events").select("*").eq("viewer_code",viewerCode.trim().toUpperCase()).single();
     if(error||!data){showToast("Invalid event code!","error");setLoading(false);return;}
@@ -626,7 +651,7 @@ function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
       <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={()=>{if(event)setEvent(null);else onBack();}}>← BACK</button>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>ATTENDEE REGISTRATION</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>{!event?"Enter your event code to follow the event live.":"Register as an attendee to follow this event live."}</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>{!event?"Enter the event code sent to you by the organizer.":"Register as an attendee to follow this event live."}</div>
         {!event?(
           <>
             <div style={{marginBottom:14}}>
@@ -667,7 +692,7 @@ function JudgeLoginScreen({ onBack, onLogin, showToast }) {
   const c=PALETTE[Math.max(0,categories.indexOf(peek?.category))%PALETTE.length];
 
   const doLogin=async()=>{
-    if(!code.trim())return showToast("Enter your judge code!","error");
+    if(!code.trim())return showToast("Enter the judge code sent to you by the organizer!","error");
     if(!name.trim())return showToast("Enter your name!","error");
     setLoading(true);
     const upper=code.trim().toUpperCase();
@@ -690,10 +715,10 @@ function JudgeLoginScreen({ onBack, onLogin, showToast }) {
       <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>JUDGE LOGIN</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter your judge code and name. First time? You'll be registered automatically.</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the judge code sent to you by the organizer. First time? You'll be registered automatically.</div>
         <div style={{marginBottom:16}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>JUDGE CODE</div>
-          <input className="inp" placeholder="Code from DanBuzz admin" value={code} onChange={e=>setCode(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
+          <input className="inp" placeholder="Code from your organizer" value={code} onChange={e=>setCode(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
         </div>
         <div style={{marginBottom:20}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>YOUR NAME</div>
@@ -1398,7 +1423,7 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
 function EmceeLoginScreen({ onBack, onLogin, showToast }) {
   const [code,setCode]=useState(""); const [name,setName]=useState(""); const [loading,setLoading]=useState(false);
   const handleLogin=async()=>{
-    if(!code.trim())return showToast("Enter event code!","error");
+    if(!code.trim())return showToast("Enter the event code sent to you by the organizer!","error");
     if(!name.trim())return showToast("Enter your name!","error");
     setLoading(true);
     const{data,error}=await supabase.from("events").select("*").eq("viewer_code",code.trim().toUpperCase()).single();
@@ -1411,7 +1436,7 @@ function EmceeLoginScreen({ onBack, onLogin, showToast }) {
       <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎤 EMCEE LOGIN</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the event code and your name to access the Emcee dashboard.</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the event code sent to you by the organizer and your name to access the Emcee dashboard.</div>
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>EVENT CODE</div>
           <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={code} onChange={e=>setCode(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
