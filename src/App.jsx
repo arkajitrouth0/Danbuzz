@@ -1159,7 +1159,7 @@ function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
 // ORGANIZER: Attendee tab
 // ─────────────────────────────────────────────────────────────────
 function AttendeeTab({ event, col, showToast }) {
-  const [form,setForm]=useState({name:"",city:"",phone:""});
+  const [form,setForm]=useState({name:"",city:"",phone:"",payment_method:"cash"});
   const [attendees,setAttendees]=useState([]);
   const [loading,setLoading]=useState(false); const [listLoading,setListLoading]=useState(true);
   const load=async()=>{setListLoading(true);const{data}=await supabase.from("attendees").select("*").eq("event_id",event.id).eq("role","attendee");setAttendees(data||[]);setListLoading(false);};
@@ -1167,11 +1167,11 @@ function AttendeeTab({ event, col, showToast }) {
   const submit=async()=>{
     if(!form.name.trim()||!form.city.trim()||!form.phone.trim())return showToast("Fill name, city and phone!","error");
     setLoading(true);
-    let{error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee",category:null});
-    if(error&&error.message&&error.message.toLowerCase().includes("category"))({error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee"}));
+    let{error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee",category:null,payment_method:form.payment_method||"cash"});
+    if(error&&error.message&&(error.message.toLowerCase().includes("category")||error.message.toLowerCase().includes("payment_method")))({error}=await supabase.from("attendees").insert({event_id:event.id,name:form.name.trim(),city:form.city.trim(),phone:form.phone.trim(),role:"attendee"}));
     if(error){showToast("Failed: "+error.message,"error");setLoading(false);return;}
     showToast(`${form.name} registered as Viewer ✓`);
-    setForm({name:"",city:"",phone:""});setLoading(false);load();
+    setForm({name:"",city:"",phone:"",payment_method:"cash"});setLoading(false);load();
   };
   return (
     <div className="slide">
@@ -1186,6 +1186,17 @@ function AttendeeTab({ event, col, showToast }) {
             </div>
           ))}
         </div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",letterSpacing:2,marginBottom:6}}>PAYMENT METHOD</div>
+          <div style={{display:"flex",gap:14}}>
+            {[["cash","💵 Cash"],["online","📲 Online"]].map(([val,label])=>(
+              <label key={val} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontFamily:"Barlow,sans-serif",fontSize:12,color:form.payment_method===val?col.primary:"#555",transition:"color .15s"}}>
+                <input type="radio" name="atab_payment" value={val} checked={form.payment_method===val} onChange={()=>setForm(f=>({...f,payment_method:val}))} style={{accentColor:col.primary,width:14,height:14,cursor:"pointer"}}/>
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
         <button className="btn" style={{background:col.primary,color:"#000",width:"100%",marginTop:4}} onClick={submit} disabled={loading}>{loading?<Spinner/>:"+ REGISTER VIEWER"}</button>
       </div>
       <div style={{marginTop:8}}>
@@ -1194,8 +1205,9 @@ function AttendeeTab({ event, col, showToast }) {
           <div key={a.id} className="lrow" style={{borderRadius:8,background:"#0c0c0c",border:"1px solid #161616",marginBottom:5}}>
             <div style={{flex:1}}>
               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14}}>{a.name}</div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{a.city}</div>
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{a.city}{a.phone?` · ${a.phone}`:""}</div>
             </div>
+            <span className="badge" style={{background:a.payment_method==="online"?"#00e5ff22":"#ffd70022",color:a.payment_method==="online"?"#00e5ff":"#ffd700",border:`1px solid ${a.payment_method==="online"?"#00e5ff44":"#ffd70044"}`,fontSize:9,marginRight:4}}>{a.payment_method==="online"?"📲 ONLINE":"💵 CASH"}</span>
             <span className="badge" style={{background:"#00e5ff22",color:"#00e5ff",border:"1px solid #00e5ff44",fontSize:9}}>VIEWER</span>
           </div>
         ))}
@@ -2332,37 +2344,48 @@ function Dashboard({ event, onBack, showToast }) {
   const checkIn=useCallback(async(id)=>{const{error}=await supabase.from("participants").update({checked_in:true}).eq("id",id);if(error)return showToast("Check-in failed!","error");showToast("Dancer checked in ✓");},[showToast]);
   const endEvent=async()=>{const{error}=await supabase.from("events").delete().eq("id",event.id);if(error)return showToast("Failed!","error");onBack();};
 
+  const downloadXLSX=(sheetData,filename)=>{
+    const XLSX=window.XLSX;
+    if(!XLSX){showToast("Excel library not loaded yet, try again","error");return;}
+    const ws=XLSX.utils.aoa_to_sheet(sheetData);
+    // Auto column widths
+    const colWidths=sheetData[0].map((_,ci)=>({wch:Math.max(...sheetData.map(r=>String(r[ci]||"").length),10)+2}));
+    ws["!cols"]=colWidths;
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Sheet1");
+    XLSX.writeFile(wb,filename);
+  };
+
   const exportParticipantsCSV=()=>{
-    const rows=[["Category","Name","City","Phone","Checked In","Prelim Score",...rounds.filter(r=>r!=="Prelims").map(r=>`${r} Result`)]];
+    const knockoutRounds=rounds.filter(r=>r!=="Prelims");
+    const headers=["Category","Name","City","Phone","Payment","Checked In","Prelim Score",...knockoutRounds.map(r=>`${r} Result`)];
+    const rows=[headers];
     participants.forEach(p=>{
       const prelimScore=getScore(p.id)||"";
-      const roundResults=rounds.filter(r=>r!=="Prelims").map(r=>{
+      const roundResults=knockoutRounds.map(r=>{
         const bds=battles.filter(b=>b.category===p.category&&b.round===r&&(b.p1_id===p.id||b.p2_id===p.id));
         if(!bds.length)return "";
         const mi=bds[0].match_index;
         const allDecs=battles.filter(b=>b.category===p.category&&b.round===r&&b.match_index===mi);
         const result=resolveBattle(allDecs);
-        if(!result)return "pending";
-        if(result.is_tie)return "tie";
+        if(!result)return "Pending";
+        if(result.status==="tied")return "Tie";
         return result.winner_id===p.id?"WIN":"LOSS";
       });
-      rows.push([p.category,p.name,p.city,p.phone||"",p.checked_in?"Yes":"No",prelimScore,...roundResults]);
+      rows.push([p.category,p.name,p.city||"",p.phone||"",p.payment_method==="online"?"Online":"Cash",p.checked_in?"Yes":"No",prelimScore,...roundResults]);
     });
-    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);const a=document.createElement("a");
-    a.href=url;a.download=`${event.name.replace(/\s+/g,"-")}-participants.csv`;a.click();URL.revokeObjectURL(url);
-    showToast("Participants CSV exported ✓");
+    downloadXLSX(rows,`${event.name.replace(/\s+/g,"-")}-participants.xlsx`);
+    showToast("Participants Excel exported ✓");
   };
 
   const exportViewersCSV=()=>{
     const viewers=attendees.filter(a=>a.role==="attendee");
-    const rows=[["Name","City","Phone","Registered At"]];
-    viewers.forEach(a=>{rows.push([a.name,a.city||"",a.phone||"",a.created_at||""]);});
-    if(viewers.length===0)rows.push(["(no viewers registered)"]);
-    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob=new Blob([csv],{type:"text/csv"});const url=URL.createObjectURL(blob);const a=document.createElement("a");
-    a.href=url;a.download=`${event.name.replace(/\s+/g,"-")}-viewers.csv`;a.click();URL.revokeObjectURL(url);
-    showToast("Viewers CSV exported ✓");
+    const headers=["Name","Phone","City","Payment","Registered At"];
+    const rows=[headers];
+    viewers.forEach(a=>{rows.push([a.name,a.phone||"",a.city||"",a.payment_method==="online"?"Online":"Cash",a.created_at?new Date(a.created_at).toLocaleString():""]);});
+    if(viewers.length===0)rows.push(["(no viewers registered)","","","",""]);
+    downloadXLSX(rows,`${event.name.replace(/\s+/g,"-")}-viewers.xlsx`);
+    showToast("Viewers Excel exported ✓");
   };
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080808"}}><Spinner/></div>;
@@ -2642,15 +2665,18 @@ function Dashboard({ event, onBack, showToast }) {
         {tab==="export"&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>EXPORT EVENT DATA</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:16}}>Download separate CSVs for competition participants (with scores & battle results) or registered viewers.</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:16}}>Download Excel sheets for participants (name, phone, payment, category, check-in, scores & results) or viewers (name, phone, city, payment).</div>
             <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
               <div style={{background:"#0f0f0f",border:"1px solid #181818",borderRadius:8,padding:"8px 14px",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#888"}}>
                 📋 <strong style={{color:"#fff"}}>{participants.length}</strong> competition participants · <strong style={{color:"#00e5ff"}}>{attendees.filter(a=>a.role==="attendee").length}</strong> viewers
               </div>
             </div>
+            <div style={{background:"#0a1a0a",border:"1px solid #00c85322",borderRadius:8,padding:"8px 14px",marginBottom:16,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
+              📊 Exports as <strong>.xlsx</strong> Excel file — opens directly in Excel, Google Sheets, or Numbers.
+            </div>
             <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-              <button className="btn" style={{background:"#ffd700",color:"#000",fontSize:13,padding:"13px 28px"}} onClick={exportParticipantsCSV}>⬇ EXPORT PARTICIPANTS (CSV)</button>
-              <button className="btn" style={{background:"#00e5ff",color:"#000",fontSize:13,padding:"13px 28px"}} onClick={exportViewersCSV}>⬇ EXPORT VIEWERS (CSV)</button>
+              <button className="btn" style={{background:"#ffd700",color:"#000",fontSize:13,padding:"13px 28px"}} onClick={exportParticipantsCSV}>⬇ EXPORT PARTICIPANTS (.xlsx)</button>
+              <button className="btn" style={{background:"#00e5ff",color:"#000",fontSize:13,padding:"13px 28px"}} onClick={exportViewersCSV}>⬇ EXPORT VIEWERS (.xlsx)</button>
             </div>
           </div>
         )}
@@ -2672,6 +2698,12 @@ export default function App() {
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
 
   useEffect(()=>{
+    // Load SheetJS for Excel exports
+    if(!window.XLSX){
+      const s=document.createElement("script");
+      s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      document.head.appendChild(s);
+    }
     supabase.auth.getSession().then(({data:{session}})=>{if(session?.user)setScreen("adminDashboard");else setScreen("landing");});
     const{data:{subscription}}=supabase.auth.onAuthStateChange((_e,session)=>{if(!session?.user&&screen==="adminDashboard")setScreen("landing");});
     return()=>subscription.unsubscribe();
