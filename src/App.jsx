@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 
 // ─────────────────────────────────────────────────────────────────
@@ -233,30 +233,132 @@ function Toast({toast}) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// LIVE NOTIFICATION HOOK — used by Judge, Emcee, Attendee dashboards
-// Subscribes to event_notifications table and shows a popup banner
+// TIME AGO HELPER
 // ─────────────────────────────────────────────────────────────────
-function useLiveNotifications(eventId) {
-  const [notif, setNotif] = useState(null);
+function timeAgo(dateStr) {
+  if (!dateStr) return "";
+  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// LIVE NOTIFICATION HOOK
+// Rules:
+//   - Default popup window: 30 minutes from creation time.
+//   - On mount: load most recent notification within 30 min that is not
+//     disabled for this role. Show with REMAINING time (30min - age).
+//   - New notification sent: always replaces current popup, fresh 30-min timer.
+//   - Host disables for a specific recipient group (disabled_for: string[]):
+//       If this role is added to disabled_for -> close popup immediately.
+//       Other recipient groups are NOT affected.
+//   - User taps X -> local dismiss only, does not affect other recipients.
+//   - disabled_for is a JSON array in DB, e.g. ["judge","attendee"]
+// ─────────────────────────────────────────────────────────────────
+const POPUP_DURATION_MS = 30 * 60 * 1000;
+
+function isDisabledFor(notif, role) {
+  if (!role) return false;
+  const df = notif.disabled_for;
+  if (!df) return false;
+  const arr = Array.isArray(df) ? df : (typeof df === "string" ? JSON.parse(df) : []);
+  return arr.includes(role);
+}
+
+function useLiveNotifications(eventId, recipientRole) {
+  const [popup, setPopup]     = useState(null);
+  const [history, setHistory] = useState([]);
+  const popupTimerRef         = useRef(null);
+
+  const showPopup = useCallback((n) => {
+    if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+    const age = Date.now() - new Date(n.created_at).getTime();
+    const remaining = Math.max(0, POPUP_DURATION_MS - age);
+    if (remaining === 0) return;
+    setPopup(n);
+    popupTimerRef.current = setTimeout(() => setPopup(null), remaining);
+  }, []);
+
   useEffect(() => {
     if (!eventId) return;
-    const ch = supabase.channel(`notif-${eventId}`)
+    const since = new Date(Date.now() - POPUP_DURATION_MS).toISOString();
+    supabase.from("event_notifications")
+      .select("*")
+      .eq("event_id", eventId)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        if (!data) return;
+        const filtered = recipientRole
+          ? data.filter(n => !n.recipients || n.recipients.includes(recipientRole))
+          : data;
+        setHistory(filtered);
+        const recent = filtered.find(n => !isDisabledFor(n, recipientRole));
+        if (recent) showPopup(recent);
+      });
+  }, [eventId, recipientRole]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!eventId) return;
+    const ch = supabase.channel(`notif-${eventId}-${recipientRole || "all"}`)
       .on("postgres_changes", {
         event: "INSERT", schema: "public",
         table: "event_notifications",
         filter: `event_id=eq.${eventId}`
       }, (p) => {
-        setNotif(p.new);
-        setTimeout(() => setNotif(null), 6000);
+        const n = p.new;
+        if (recipientRole && n.recipients && !n.recipients.includes(recipientRole)) return;
+        setHistory(prev => [n, ...prev]);
+        if (!isDisabledFor(n, recipientRole)) showPopup(n);
+      })
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public",
+        table: "event_notifications",
+        filter: `event_id=eq.${eventId}`
+      }, (p) => {
+        const n = p.new;
+        setHistory(prev => prev.map(x => x.id === n.id ? n : x));
+        if (isDisabledFor(n, recipientRole)) {
+          setPopup(prev => {
+            if (prev?.id === n.id) {
+              if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+              return null;
+            }
+            return prev;
+          });
+        }
       })
       .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [eventId]);
-  return notif;
+    return () => {
+      supabase.removeChannel(ch);
+      if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+    };
+  }, [eventId, recipientRole, showPopup]);
+
+  return {
+    popup,
+    history,
+    dismissPopup: () => {
+      if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+      setPopup(null);
+    },
+  };
 }
 
-function LiveNotifBanner({ notif }) {
-  if (!notif) return null;
+function LiveNotifBanner({ popup, onDismiss }) {
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceUpdate(n => n+1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  if (!popup) return null;
+  const age = Math.floor((Date.now() - new Date(popup.created_at).getTime()) / 1000);
+  const remainingSec = Math.max(0, POPUP_DURATION_MS / 1000 - age);
+  const remainingLabel = remainingSec > 60
+    ? `auto-closes in ${Math.ceil(remainingSec / 60)} min`
+    : remainingSec > 0 ? `auto-closes in ${remainingSec}s` : "";
   return (
     <div className="slide" style={{
       position:"fixed",top:0,left:0,right:0,zIndex:9998,
@@ -267,13 +369,108 @@ function LiveNotifBanner({ notif }) {
     }}>
       <div className="pulse" style={{width:10,height:10,borderRadius:"50%",background:"#ff9800",flexShrink:0}}/>
       <div style={{flex:1}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:"#ff9800",letterSpacing:4,marginBottom:2}}>📢 ANNOUNCEMENT</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:15,color:"#fff",fontWeight:700}}>{notif.message}</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:"#ff9800",letterSpacing:4,marginBottom:2}}>ANNOUNCEMENT</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:15,color:"#fff",fontWeight:700}}>{popup.message}</div>
+        <div style={{display:"flex",gap:10,marginTop:3,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff980088"}}>{timeAgo(popup.created_at)}</span>
+          {remainingLabel&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff980055"}}>{remainingLabel}</span>}
+        </div>
       </div>
-      {notif.round&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff9800",letterSpacing:2,background:"#ff980022",border:"1px solid #ff980044",borderRadius:6,padding:"4px 12px"}}>{notif.round}</span>}
+      {popup.round&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff9800",letterSpacing:2,background:"#ff980022",border:"1px solid #ff980044",borderRadius:6,padding:"4px 12px"}}>{popup.round}</span>}
+      <button onClick={onDismiss} title="Dismiss for yourself only" style={{background:"#ff980022",border:"1px solid #ff980044",color:"#ff9800",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:1}}>X</button>
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────
+// NOTIFICATION HISTORY PANEL
+// isHost=true shows per-recipient group disable toggles per notification
+// ─────────────────────────────────────────────────────────────────
+const RECIPIENT_LABELS = { judge:"Judges", emcee:"Emcee", attendee:"Attendees", organizer:"Organizers" };
+
+function NotificationHistoryPanel({ history, isHost, showToast }) {
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceUpdate(n => n+1), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const toggleDisableFor = async (notif, role) => {
+    const current = Array.isArray(notif.disabled_for)
+      ? notif.disabled_for
+      : (notif.disabled_for ? JSON.parse(notif.disabled_for) : []);
+    const updated = current.includes(role)
+      ? current.filter(r => r !== role)
+      : [...current, role];
+    const { error } = await supabase.from("event_notifications")
+      .update({ disabled_for: updated })
+      .eq("id", notif.id);
+    if (error && showToast) showToast("Failed: " + error.message, "error");
+  };
+
+  return (
+    <div style={{background:"#0d0d0d",border:"1px solid #1a1a1a",borderRadius:12,overflow:"hidden"}}>
+      <div style={{padding:"10px 16px",background:"#111",borderBottom:"1px solid #1a1a1a",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:"#ff9800"}}>ANNOUNCEMENTS</span>
+        <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#444",marginLeft:4}}>({history.length})</span>
+        {isHost&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginLeft:"auto"}}>tap a group button to turn off popup for that group only</span>}
+      </div>
+      {history.length === 0 ? (
+        <div style={{padding:"24px",textAlign:"center",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#333"}}>No announcements yet</div>
+      ) : (
+        history.map(n => {
+          const disabledFor = Array.isArray(n.disabled_for)
+            ? n.disabled_for
+            : (n.disabled_for ? JSON.parse(n.disabled_for) : []);
+          const sentTo = n.recipients || ["judge","emcee","attendee","organizer"];
+          const allDisabled = sentTo.every(r => disabledFor.includes(r));
+          return (
+            <div key={n.id} style={{padding:"12px 16px",borderBottom:"1px solid #111",opacity:allDisabled?0.4:1}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:allDisabled?"#444":"#ff9800",marginTop:5,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:13,color:allDisabled?"#555":"#fff",lineHeight:1.4}}>{n.message}</div>
+                  <div style={{display:"flex",gap:8,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>{timeAgo(n.created_at)}</span>
+                    {n.round&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:"#ff9800",background:"#ff980011",border:"1px solid #ff980033",borderRadius:4,padding:"1px 6px"}}>{n.round}</span>}
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#444"}}>sent to: {sentTo.map(r=>RECIPIENT_LABELS[r]||r).join(", ")}</span>
+                  </div>
+                  {isHost && (
+                    <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginRight:2}}>Turn off popup for:</span>
+                      {sentTo.map(role => {
+                        const isOff = disabledFor.includes(role);
+                        return (
+                          <button key={role} onClick={() => toggleDisableFor(n, role)}
+                            title={isOff ? "Re-enable popup for "+( RECIPIENT_LABELS[role]||role) : "Turn off popup for "+(RECIPIENT_LABELS[role]||role)}
+                            style={{
+                              fontFamily:"Barlow,sans-serif",fontSize:9,padding:"3px 9px",borderRadius:20,cursor:"pointer",
+                              background: isOff ? "#2a0a0a" : "#0a1a0a",
+                              border: "1px solid "+(isOff ? "#ff4d4d44" : "#00c85344"),
+                              color: isOff ? "#ff4d4d" : "#00c853",
+                              transition:"all .15s",
+                            }}>
+                            {isOff ? ("ON "+( RECIPIENT_LABELS[role]||role)) : ("OFF "+(RECIPIENT_LABELS[role]||role))}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {!isHost && disabledFor.length > 0 && (
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",marginTop:4}}>
+                      popup off for: {disabledFor.map(r => RECIPIENT_LABELS[r]||r).join(", ")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 
 // ─────────────────────────────────────────────────────────────────
 // LANDING
@@ -598,20 +795,26 @@ function AdminCreateEvent({ showToast, onCreated }) {
 // ORG LOGIN
 // ─────────────────────────────────────────────────────────────────
 function OrgLoginScreen({ onBack, onLogin, showToast }) {
-  const [orgCode,setOrgCode]=useState(""); const [loading,setLoading]=useState(false);
+  const [orgCode,setOrgCode]=useState(""); const [memberName,setMemberName]=useState(""); const [loading,setLoading]=useState(false);
   const handleSubmit=async()=>{
     if(!orgCode.trim())return showToast("Enter the organizer code sent to you by DanBuzz!","error");
+    if(!memberName.trim())return showToast("Enter your name (team member)!","error");
     setLoading(true);
     const{data,error}=await supabase.from("events").select("*").eq("org_code",orgCode.trim().toUpperCase()).single();
     if(error||!data){showToast("Invalid organizer code!","error");setLoading(false);return;}
-    onLogin(data);setLoading(false);
+    onLogin(data, memberName.trim());setLoading(false);
   };
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"#080808"}}>
       <div style={{width:"100%",maxWidth:360}}>
         <button className="btn" style={{background:"transparent",color:"#555",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>ORGANIZER LOGIN</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the organizer code sent to you by DanBuzz. Check your email or WhatsApp from our team.</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#555",marginBottom:28}}>Enter the organizer code sent to you by DanBuzz. Multiple team members can log in with the same code.</div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>YOUR NAME <span style={{color:"#ff4d4d"}}>*</span></div>
+          <input className="inp" placeholder="e.g. Roshan / Team Lead" value={memberName} onChange={e=>setMemberName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#444",marginTop:4}}>Multiple team members can access simultaneously with the same code</div>
+        </div>
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555",letterSpacing:2,marginBottom:6}}>ORGANIZER CODE</div>
           <input className="inp" placeholder="e.g. ORG-XYZ-1234" value={orgCode} onChange={e=>setOrgCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} style={{letterSpacing:3,fontFamily:"Bebas Neue,sans-serif",fontSize:20}}/>
@@ -738,7 +941,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const categories = event.categories||[];
   const rounds     = event.rounds||["Prelims","Finals"];
   const myCategory = judgeCode.category;
-  const liveNotif  = useLiveNotifications(event.id);
+  const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "judge");
+  const [showNotifHistory, setShowNotifHistory] = useState(false);
   const myKey      = `${myCategory}-J${judgeCode.slot}`;
   const col        = getCatColor(categories, myCategory);
 
@@ -877,7 +1081,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
-      <LiveNotifBanner notif={liveNotif}/>
+      <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
       <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
           <div>
@@ -898,9 +1102,15 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             ):(
               <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",padding:"7px 12px",background:"#111",borderRadius:8,border:"1px solid #222"}}>Knockout not started yet</div>
             )}
+            <button className="btn" style={{background:showNotifHistory?"#ff980022":"transparent",color:"#ff9800",border:"1px solid #ff980033",fontSize:11,position:"relative"}} onClick={()=>setShowNotifHistory(p=>!p)}>
+              🔔{notifHistory.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#ff9800",color:"#000",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Barlow,sans-serif",fontSize:8,fontWeight:700}}>{notifHistory.length}</span>}
+            </button>
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← LOGOUT</button>
           </div>
         </div>
+        {showNotifHistory&&(
+          <div style={{marginBottom:16}}><NotificationHistoryPanel history={notifHistory} isHost={false}/></div>
+        )}
         <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",overflowX:"auto"}}>
           {[{key:"scoring",label:isPrelim?"PRELIM SCORING":"BATTLE JUDGING"},{key:"leaderboard",label:"LEADERBOARD"}].map(t=>(
             <button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#555",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>
@@ -1425,7 +1635,8 @@ function WinnerDashboard({ event, categories, participants, battles, allRounds }
 function AttendeeDashboard({ event, attendeeName, onBack }) {
   const categories = event.categories||[];
   const allRounds  = event.rounds||["Prelims","Finals"];
-  const liveNotif  = useLiveNotifications(event.id);
+  const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "attendee");
+  const [showNotifHistory, setShowNotifHistory] = useState(false);
   // Attendees only see knockout rounds — prelims are hidden
   const rounds     = allRounds.filter(r=>r!=="Prelims");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
@@ -1477,7 +1688,7 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
-      <LiveNotifBanner notif={liveNotif}/>
+      <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
       <div style={{padding:"22px 22px 0",maxWidth:900,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
           <div>
@@ -1497,8 +1708,16 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
               <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",padding:"7px 12px",background:"#111",borderRadius:8,border:"1px solid #222"}}>Knockout not started yet</div>
             )}
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← EXIT</button>
+            <button className="btn" style={{background:showNotifHistory?"#ff980022":"transparent",color:"#ff9800",border:"1px solid #ff980033",fontSize:11,position:"relative"}} onClick={()=>setShowNotifHistory(p=>!p)}>
+              🔔{notifHistory.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#ff9800",color:"#000",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Barlow,sans-serif",fontSize:8,fontWeight:700}}>{notifHistory.length}</span>}
+            </button>
           </div>
         </div>
+        {showNotifHistory&&(
+          <div style={{marginBottom:16}}>
+            <NotificationHistoryPanel history={notifHistory} isHost={false}/>
+          </div>
+        )}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:0}}>
           {categories.map(cat=>{const c=getCatColor(categories,cat);const cnt=participants.filter(p=>p.category===cat&&p.checked_in).length;const active=activeCat===cat;return <button key={cat} className="btn" style={{fontSize:11,padding:"7px 14px",background:active?c.primary:"#111",color:active?"#000":"#555",border:`1px solid ${active?c.primary:"#222"}`}} onClick={()=>setActiveCat(cat)}>{cat} <span style={{opacity:.7}}>({cnt})</span></button>;})}
         </div>
@@ -1616,7 +1835,8 @@ function EmceeDashboard({ event, emceeName, onBack }) {
   const [currentRound,setCurrentRound] = useState(rounds[0]||"Prelims");
   const col          = getCatColor(categories,activeCat);
   const isPrelim     = currentRound==="Prelims";
-  const liveNotif    = useLiveNotifications(event.id);
+  const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "emcee");
+  const [showNotifHistory, setShowNotifHistory] = useState(false);
 
   const [participants,setParticipants] = useState([]);
   const [scores,setScores]             = useState([]);
@@ -1663,7 +1883,7 @@ function EmceeDashboard({ event, emceeName, onBack }) {
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
-      <LiveNotifBanner notif={liveNotif}/>
+      <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
       <div style={{padding:"22px 22px 0",maxWidth:1000,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
 
         {/* Header */}
@@ -1682,9 +1902,15 @@ function EmceeDashboard({ event, emceeName, onBack }) {
             <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
               {rounds.map(r=><option key={r}>{r}</option>)}
             </select>
+            <button className="btn" style={{background:showNotifHistory?"#ff980022":"transparent",color:"#ff9800",border:"1px solid #ff980033",fontSize:11,position:"relative"}} onClick={()=>setShowNotifHistory(p=>!p)}>
+              🔔{notifHistory.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#ff9800",color:"#000",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Barlow,sans-serif",fontSize:8,fontWeight:700}}>{notifHistory.length}</span>}
+            </button>
             <button className="btn" style={{background:"transparent",color:"#555",border:"1px solid #222",fontSize:11}} onClick={onBack}>← EXIT</button>
           </div>
         </div>
+        {showNotifHistory&&(
+          <div style={{marginBottom:16}}><NotificationHistoryPanel history={notifHistory} isHost={false}/></div>
+        )}
 
         {/* Category tabs */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
@@ -1814,17 +2040,31 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
   const [notifMsg, setNotifMsg] = useState("");
   const [notifRound, setNotifRound] = useState("");
   const [notifSending, setNotifSending] = useState(false);
+  const [notifRecipients, setNotifRecipients] = useState(["judge","emcee","attendee","organizer"]);
+  const RECIPIENT_OPTIONS = [
+    {key:"judge",   label:"Judges",     color:"#ffd700"},
+    {key:"emcee",   label:"Emcee",      color:"#ff9800"},
+    {key:"attendee",label:"Attendees",  color:"#00e5ff"},
+    {key:"organizer",label:"Organizers",color:"#ff4d4d"},
+  ];
+  const toggleRecipient = (key) => setNotifRecipients(prev =>
+    prev.includes(key) ? prev.filter(r=>r!==key) : [...prev, key]
+  );
 
-  const sendNotification = async (msg, round) => {
+  const sendNotification = async (msg, round, recipients) => {
+    const rcpts = recipients || notifRecipients;
     if (!msg.trim()) return showToast("Enter a message!","error");
+    if (!rcpts.length) return showToast("Select at least one recipient!","error");
     setNotifSending(true);
     const { error } = await supabase.from("event_notifications").insert({
       event_id: event.id,
       message: msg.trim(),
       round: round || null,
+      recipients: rcpts,
+      disabled: false,
     });
     if (error) { showToast("Failed to send: "+error.message,"error"); setNotifSending(false); return; }
-    showToast("📢 Announcement sent!");
+    showToast("📢 Announcement sent to: "+rcpts.join(", ")+"!");
     setNotifMsg(""); setNotifRound(""); setNotifSending(false);
   };
 
@@ -1947,15 +2187,33 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
           <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:"#ff9800",minWidth:28}}>📢</div>
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,color:"#ff9800"}}>SEND ANNOUNCEMENT</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Pops up live on Judge, Emcee and Attendee screens</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#555"}}>Send live notifications to selected recipients</div>
           </div>
         </div>
         <div style={{padding:"14px 16px"}}>
+          {/* Recipient selector */}
+          <div style={{marginBottom:12}}>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#555",letterSpacing:2,marginBottom:7}}>SEND TO <span style={{color:"#ff4d4d"}}>*</span></div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {RECIPIENT_OPTIONS.map(r=>{
+                const isOn = notifRecipients.includes(r.key);
+                return (
+                  <button key={r.key} onClick={()=>toggleRecipient(r.key)}
+                    style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"5px 12px",borderRadius:20,
+                      background:isOn?`${r.color}22`:"#111",
+                      border:`1px solid ${isOn?r.color:"#2a2a2a"}`,
+                      color:isOn?r.color:"#555",cursor:"pointer",transition:"all .15s"}}>
+                    {isOn?"✓ ":""}{r.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:12}}>
             {QUICK_ANNOUNCEMENTS.map(q=>(
               <button key={q.label} className="btn"
                 style={{fontSize:10,padding:"6px 12px",background:"#1a0e00",color:"#ff9800",border:"1px solid #ff980044"}}
-                onClick={()=>sendNotification(q.msg, q.round)}
+                onClick={()=>sendNotification(q.msg, q.round, notifRecipients)}
                 disabled={notifSending}>
                 {q.label}
               </button>
@@ -1964,7 +2222,7 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <input className="inp" placeholder="Or type a custom announcement…" value={notifMsg}
               onChange={e=>setNotifMsg(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&sendNotification(notifMsg,notifRound)}
+              onKeyDown={e=>e.key==="Enter"&&sendNotification(notifMsg,notifRound,notifRecipients)}
               style={{flex:1,minWidth:200}}/>
             <select className="inp" value={notifRound} onChange={e=>setNotifRound(e.target.value)}
               style={{width:"auto",padding:"9px 32px 9px 11px"}}>
@@ -1972,10 +2230,11 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
               {allRounds.map(r=><option key={r}>{r}</option>)}
             </select>
             <button className="btn" style={{background:"#ff9800",color:"#000",fontSize:12,padding:"9px 18px"}}
-              onClick={()=>sendNotification(notifMsg,notifRound)} disabled={notifSending||!notifMsg.trim()}>
+              onClick={()=>sendNotification(notifMsg,notifRound,notifRecipients)} disabled={notifSending||!notifMsg.trim()}>
               {notifSending?<Spinner/>:"SEND →"}
             </button>
           </div>
+          {notifRecipients.length===0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d",marginTop:6}}>⚠ Select at least one recipient</div>}
         </div>
       </div>
 
@@ -2260,7 +2519,7 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
 // ─────────────────────────────────────────────────────────────────
 // ORGANIZER DASHBOARD
 // ─────────────────────────────────────────────────────────────────
-function Dashboard({ event, onBack, showToast }) {
+function Dashboard({ event, memberName, onBack, showToast }) {
   const categories = event.categories||[];
   const rounds     = event.rounds||["Prelims","Top 8","Top 4","Finals"];
   const [tab,setTab]=useState("organizer");
@@ -2268,6 +2527,7 @@ function Dashboard({ event, onBack, showToast }) {
   const [currentRound,setCurrentRound]=useState(rounds[0]||"Prelims");
   const [searchQr,setSearchQr]=useState(""); const [showQrFor,setShowQrFor]=useState(null);
   const [overlayActive,setOverlayActive]=useState(false); const [showConfirm,setShowConfirm]=useState(false);
+  const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "organizer");
 
   const [judgeCodes,setJudgeCodes]=useState([]);
   const [participants,setParticipants]=useState([]);
@@ -2393,6 +2653,7 @@ function Dashboard({ event, onBack, showToast }) {
 
   return (
     <div style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"#080808",minHeight:"100vh",color:"#fff"}}>
+      <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
 
       {/* Stream overlay */}
       {overlayActive&&(()=>{
@@ -2439,6 +2700,7 @@ function Dashboard({ event, onBack, showToast }) {
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:52,letterSpacing:5,lineHeight:1,color:"#fff"}}>{event.name}</div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>DanBuzz · {event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}</div>
+            {memberName&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}><div style={{width:6,height:6,borderRadius:"50%",background:"#ff4d4d"}}/><span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d",letterSpacing:2}}>ORGANIZER · {memberName}</span></div>}
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
             {rounds.length>0?(
@@ -2477,6 +2739,7 @@ function Dashboard({ event, onBack, showToast }) {
             {key:"scores",label:"SCORES (VIEW)"},
             {key:"bracket",label:"BRACKET"},
             {key:"leaderboard",label:"LEADERBOARD"},
+            {key:"notifications",label:`🔔 ANNOUNCEMENTS${notifHistory.length>0?" ("+notifHistory.length+")":""}`},
             {key:"export",label:"EXPORT"},
           ].map(t=><button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#555",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>)}
         </div>
@@ -2662,6 +2925,15 @@ function Dashboard({ event, onBack, showToast }) {
 
 
 
+
+        {tab==="notifications"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>ANNOUNCEMENTS LOG</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#555",marginBottom:16}}>All announcements sent during this event. As host you can hide/show any announcement's popup on recipient screens.</div>
+            <NotificationHistoryPanel history={notifHistory} isHost={true} eventId={event.id} showToast={showToast}/>
+          </div>
+        )}
+
         {tab==="export"&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>EXPORT EVENT DATA</div>
@@ -2694,6 +2966,7 @@ export default function App() {
   const [judgeData,setJudgeData]=useState(null);
   const [viewerData,setViewerData]=useState(null);
   const [emceeData,setEmceeData]=useState(null);
+  const [orgMemberName,setOrgMemberName]=useState(null);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3000);};
 
@@ -2720,14 +2993,14 @@ export default function App() {
       {screen==="landing"         &&<LandingScreen onAdminLogin={()=>setScreen("adminLogin")} onOrgLogin={()=>setScreen("orgLogin")} onJudgeLogin={()=>setScreen("judgeLogin")} onViewerLogin={()=>setScreen("attendeeLogin")} onEmceeLogin={()=>setScreen("emceeLogin")}/>}
       {screen==="adminLogin"      &&<AdminLoginScreen onBack={()=>setScreen("landing")} onLogin={()=>setScreen("adminDashboard")} showToast={showToast}/>}
       {screen==="adminDashboard"  &&<AdminDashboard onBack={handleAdminLogout} showToast={showToast}/>}
-      {screen==="orgLogin"        &&<OrgLoginScreen onBack={()=>setScreen("landing")} onLogin={(ev)=>{setActiveEvent(ev);setScreen("dashboard");}} showToast={showToast}/>}
+      {screen==="orgLogin"        &&<OrgLoginScreen onBack={()=>setScreen("landing")} onLogin={(ev, memberName)=>{setActiveEvent(ev);setOrgMemberName(memberName);setScreen("dashboard");}} showToast={showToast}/>}
       {screen==="judgeLogin"      &&<JudgeLoginScreen onBack={()=>setScreen("landing")} onLogin={({judgeCode,event})=>{setJudgeData(judgeCode);setActiveEvent(event);setScreen("judgeDashboard");}} showToast={showToast}/>}
       {screen==="attendeeLogin"     &&<AttendeeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name,role})=>{setActiveEvent(event);setViewerData({name,role});setScreen("attendeeDashboard");}} showToast={showToast}/>}
       {screen==="judgeDashboard"  &&judgeData&&activeEvent&&<JudgeDashboard judgeCode={judgeData} event={activeEvent} onBack={()=>{setJudgeData(null);setActiveEvent(null);setScreen("landing");}} showToast={showToast}/>}
       {screen==="attendeeDashboard"&&viewerData&&activeEvent&&<AttendeeDashboard event={activeEvent} attendeeName={viewerData.name} onBack={()=>{setViewerData(null);setActiveEvent(null);setScreen("landing");}}/>}
       {screen==="emceeLogin"      &&<EmceeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name})=>{setActiveEvent(event);setEmceeData({name});setScreen("emceeDashboard");}} showToast={showToast}/>}
       {screen==="emceeDashboard"  &&emceeData&&activeEvent&&<EmceeDashboard event={activeEvent} emceeName={emceeData.name} onBack={()=>{setEmceeData(null);setActiveEvent(null);setScreen("landing");}}/>}
-      {screen==="dashboard"       &&activeEvent&&<Dashboard event={activeEvent} onBack={()=>{setActiveEvent(null);setScreen("landing");}} showToast={showToast}/>}
+      {screen==="dashboard"       &&activeEvent&&<Dashboard event={activeEvent} memberName={orgMemberName} onBack={()=>{setActiveEvent(null);setOrgMemberName(null);setScreen("landing");}} showToast={showToast}/>}
     </div>
   );
 }
