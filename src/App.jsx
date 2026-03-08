@@ -2061,7 +2061,6 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
       message: msg.trim(),
       round: round || null,
       recipients: rcpts,
-      disabled: false,
     });
     if (error) { showToast("Failed to send: "+error.message,"error"); setNotifSending(false); return; }
     showToast("📢 Announcement sent to: "+rcpts.join(", ")+"!");
