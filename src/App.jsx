@@ -646,7 +646,6 @@ function AdminCreateEvent({ showToast, onCreated }) {
   const [categories,setCategories]=useState([]);
   const [customInput,setCustomInput]=useState("");
   const [judgeCounts,setJudgeCounts]=useState({});
-  const [selectedRounds,setSelectedRounds]=useState(["Top 16","Top 8","Top 4","Finals"]);
   const [loading,setLoading]=useState(false);
   const [createdEvent,setCreatedEvent]=useState(null);
   const [copied,setCopied]=useState(null);
@@ -655,13 +654,9 @@ function AdminCreateEvent({ showToast, onCreated }) {
   const addCategory=(cat)=>{const t=cat.trim();if(!t)return;if(categories.map(c=>c.toLowerCase()).includes(t.toLowerCase()))return showToast(`"${t}" already added!`,"error");setCategories(p=>[...p,t]);setCustomInput("");};
   const removeCategory=(cat)=>{setCategories(p=>p.filter(c=>c!==cat));setJudgeCounts(p=>{const n={...p};delete n[cat];return n;});};
   const toggleSuggested=(cat)=>categories.map(c=>c.toLowerCase()).includes(cat.toLowerCase())?removeCategory(cat):addCategory(cat);
-  const toggleRound=(r)=>setSelectedRounds(p=>p.includes(r)?p.filter(x=>x!==r):[...p,r]);
-  const orderedRounds=["Prelims",...ALL_POST_PRELIM_ROUNDS.filter(r=>selectedRounds.includes(r))];
-
   const submit=async()=>{
     if(!form.name.trim()||!form.start_date||!form.city.trim())return showToast("Fill event name, start date and city!","error");
     if(categories.length===0)return showToast("Add at least one category!","error");
-    if(selectedRounds.length===0)return showToast("Select at least one round after Prelims!","error");
     setLoading(true);
     const orgCode=genOrgCode(); const viewerCode=genViewerCode(); const emceeCode=genEmceeCode(); const prefix=randAlpha(3);
     const jCodes=genJudgeCodes(prefix,categories,judgeCounts);
@@ -669,7 +664,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
       name:form.name.trim(),city:form.city.trim(),start_date:form.start_date,end_date:form.end_date||null,
       org_code:orgCode,viewer_code:viewerCode,emcee_code:emceeCode,categories,
       organizer_name:form.organizer.trim()||null,
-      judge_counts:judgeCounts,rounds:orderedRounds
+      judge_counts:judgeCounts,rounds:["Prelims"]  // organizer will configure knockout rounds
     }).select().single();
     if(evErr){showToast("Failed: "+evErr.message,"error");setLoading(false);return;}
     await supabase.from("judge_codes").insert(jCodes.map(j=>({event_id:ev.id,code:j.code,category:j.category,slot:j.slot})));
@@ -747,7 +742,7 @@ function AdminCreateEvent({ showToast, onCreated }) {
             </button>
           </div>
         </div>
-        <button className="btn" style={{background:"#120e22",color:"#fff",border:"1px solid #3d2080",fontSize:12}} onClick={()=>{setCreatedEvent(null);setForm({name:"",start_date:"",end_date:"",city:"",organizer:""});setCategories([]);setJudgeCounts({});setSelectedRounds(["Top 16","Top 8","Top 4","Finals"]);onCreated();}}>← BACK TO ALL EVENTS</button>
+        <button className="btn" style={{background:"#120e22",color:"#fff",border:"1px solid #3d2080",fontSize:12}} onClick={()=>{setCreatedEvent(null);setForm({name:"",start_date:"",end_date:"",city:"",organizer:""});setCategories([]);setJudgeCounts({});onCreated();}}>← BACK TO ALL EVENTS</button>
       </div>
     );
   }
@@ -773,20 +768,6 @@ function AdminCreateEvent({ showToast, onCreated }) {
         <div>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>END DATE <span style={{color:"#3d2080"}}>(optional)</span></div>
           <input className="inp" type="date" value={form.end_date} onChange={e=>setForm(f=>({...f,end_date:e.target.value}))}/>
-        </div>
-      </div>
-
-      {/* Rounds */}
-      <div style={{margin:"20px 0 0"}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>KNOCKOUT ROUNDS AFTER PRELIMS <span style={{color:"#ff4d4d"}}>*</span></div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080",marginBottom:8}}>Prelims rank all dancers by score → top qualifiers enter knockout (1v1) battles:</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
-          {ALL_POST_PRELIM_ROUNDS.map(r=>(
-            <button key={r} className={`rchip${selectedRounds.includes(r)?" on":""}`} onClick={()=>toggleRound(r)}>{selectedRounds.includes(r)?"✓ ":"+ "}{r}</button>
-          ))}
-        </div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",marginBottom:14}}>
-          Flow: <span style={{color:"#ffd700"}}>Prelims (scores) → {ALL_POST_PRELIM_ROUNDS.filter(r=>selectedRounds.includes(r)).join(" → ")||"—"} (1v1 battles)</span>
         </div>
       </div>
 
@@ -2079,10 +2060,155 @@ function EmceeDashboard({ event, emceeName, onBack }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// ROUND SETUP TAB — organizer configures knockout rounds after prelims
+// ─────────────────────────────────────────────────────────────────
+function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categories }) {
+  const currentKnockout = (eventRounds||[]).filter(r => r !== "Prelims");
+  const [selected, setSelected] = useState(currentKnockout);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  const toggle = (r) => {
+    const next = selected.includes(r) ? selected.filter(x=>x!==r) : [...selected, r];
+    setSelected(next);
+    setHasChanges(true);
+  };
+
+  const orderedSelected = ALL_POST_PRELIM_ROUNDS.filter(r => selected.includes(r));
+  const fullFlow = ["Prelims", ...orderedSelected];
+
+  // Participant count summary per category
+  const totalCheckedIn = participants.filter(p=>p.checked_in).length;
+  const totalParticipants = participants.length;
+
+  const handleSave = () => {
+    if (orderedSelected.length === 0) return;
+    onSave(["Prelims", ...orderedSelected]);
+    setHasChanges(false);
+  };
+
+  return (
+    <div className="slide">
+      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>⚡ ROUND SETUP</div>
+      <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#9980cc",marginBottom:20}}>
+        Configure which knockout rounds happen after Prelims. Based on your participant count, select the rounds that make sense for this event.
+      </div>
+
+      {/* Participant count hint */}
+      <div style={{background:"#110d22",border:`1px solid ${col.border}`,borderRadius:10,padding:"12px 16px",marginBottom:20,display:"flex",gap:20,flexWrap:"wrap"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:col.primary,lineHeight:1}}>{totalParticipants}</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginTop:2}}>REGISTERED</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:"#00c853",lineHeight:1}}>{totalCheckedIn}</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginTop:2}}>CHECKED IN</div>
+        </div>
+        <div style={{flex:1,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",display:"flex",alignItems:"center"}}>
+          {totalCheckedIn>=32?"💡 32+ dancers → Top 32 → Top 16 → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=16?"💡 16–31 dancers → Top 16 → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=8?"💡 8–15 dancers → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=4?"💡 4–7 dancers → Top 4 → Finals recommended"
+          :"💡 Under 4 checked in — Finals only recommended"}
+        </div>
+      </div>
+
+      {/* Round toggles */}
+      <div style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"18px 20px",marginBottom:16}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>SELECT KNOCKOUT ROUNDS AFTER PRELIMS</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:16}}>
+          {ALL_POST_PRELIM_ROUNDS.map(r => {
+            const isOn = selected.includes(r);
+            const limit = ROUND_LIMIT[r] ?? 0;
+            const fits = limit === 2 || totalCheckedIn === 0 || totalCheckedIn >= limit * 0.5;
+            return (
+              <button key={r}
+                onClick={()=>toggle(r)}
+                style={{
+                  fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,
+                  padding:"10px 20px",borderRadius:8,cursor:"pointer",transition:"all .15s",
+                  background:isOn?col.bg:"#160e2a",
+                  border:`2px solid ${isOn?col.primary:"#3d2080"}`,
+                  color:isOn?col.primary:"#55449a",
+                }}>
+                {isOn?"✓ ":""}{r}
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:isOn?col.primary+"aa":"#3d2080",letterSpacing:0,marginTop:2}}>
+                  {r==="Finals"?"2 dancers":r==="Top 4"?"4 dancers":r==="Top 8"?"8 dancers":r==="Top 16"?"16 dancers":"32 dancers"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Flow preview */}
+        <div style={{background:"#0b0818",border:"1px solid #2a1f4a",borderRadius:8,padding:"10px 14px"}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:6}}>FLOW PREVIEW</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {fullFlow.map((r,i) => (
+              <span key={r} style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{
+                  fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,
+                  padding:"4px 12px",borderRadius:6,
+                  background:r==="Prelims"?"#1a1428":col.bg,
+                  border:`1px solid ${r==="Prelims"?"#ffd70033":col.border}`,
+                  color:r==="Prelims"?"#ffd700":col.primary
+                }}>{r}</span>
+                {i < fullFlow.length-1 && <span style={{color:"#3d2080",fontSize:12}}>→</span>}
+              </span>
+            ))}
+            {orderedSelected.length===0 && <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d"}}>⚠ Select at least one knockout round</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Quick presets */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>QUICK PRESETS</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[
+            {label:"Top 4 → Finals",rounds:["Top 4","Finals"]},
+            {label:"Top 8 → Finals",rounds:["Top 8","Top 4","Finals"]},
+            {label:"Top 16 → Finals",rounds:["Top 16","Top 8","Top 4","Finals"]},
+            {label:"Top 32 → Finals",rounds:["Top 32","Top 16","Top 8","Top 4","Finals"]},
+            {label:"Finals Only",rounds:["Finals"]},
+          ].map(p=>(
+            <button key={p.label}
+              onClick={()=>{setSelected(p.rounds);setHasChanges(true);}}
+              style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"6px 14px",borderRadius:6,
+                background:"#160e2a",border:"1px solid #3d2080",color:"#9980cc",cursor:"pointer",
+                transition:"all .15s"}}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Current saved flow */}
+      <div style={{background:"#0a1a0a",border:"1px solid #00c85333",borderRadius:8,padding:"10px 14px",marginBottom:20,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
+        💾 Currently saved: <strong>{(eventRounds||[]).join(" → ")||"Prelims only"}</strong>
+      </div>
+
+      <button className="btn"
+        style={{background:orderedSelected.length>0?col.primary:"#1c1232",color:orderedSelected.length>0?"#000":"#55449a",fontSize:14,padding:"13px 32px",opacity:hasChanges?1:0.5}}
+        onClick={handleSave}
+        disabled={saving||orderedSelected.length===0||!hasChanges}>
+        {saving?<Spinner/>:hasChanges?"💾 SAVE ROUND FLOW →":"✓ SAVED"}
+      </button>
+
+      {!hasChanges&&orderedSelected.length>0&&(
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginTop:10}}>
+          Round flow is saved. Judges and attendees will see these rounds live.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // HOST DASHBOARD TAB — live event flow controller
 // ─────────────────────────────────────────────────────────────────
-function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast }) {
-  const allRounds  = event.rounds || ["Prelims"];
+function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast }) {
+  const allRounds  = eventRounds || event.rounds || ["Prelims"];
   const knockoutRounds = allRounds.filter(r => r !== "Prelims");
 
   const [advanceN, setAdvanceN] = useState("");
@@ -2574,7 +2700,8 @@ function HostTab({ event, activeCat, col, checkedIn, prelimRanked, getScore, bat
 // ─────────────────────────────────────────────────────────────────
 function Dashboard({ event, memberName, onBack, showToast }) {
   const categories = event.categories||[];
-  const rounds     = event.rounds||["Prelims","Top 8","Top 4","Finals"];
+  // rounds is kept in sync with eventRounds state so organizer changes reflect immediately
+  const rounds = eventRounds;
   const [tab,setTab]=useState("organizer");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
   const [currentRound,setCurrentRound]=useState(rounds[0]||"Prelims");
@@ -2588,6 +2715,8 @@ function Dashboard({ event, memberName, onBack, showToast }) {
   const [battles,setBattles]=useState([]);
   const [attendees,setAttendees]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [eventRounds,setEventRounds]=useState(event.rounds||["Prelims"]);
+  const [roundsSaving,setRoundsSaving]=useState(false);
 
   const loadDashboard=useCallback(async()=>{
     setLoading(true);
@@ -2655,6 +2784,14 @@ function Dashboard({ event, memberName, onBack, showToast }) {
   },[activeCat,event.id,showToast]);
   const checkIn=useCallback(async(id)=>{const{error}=await supabase.from("participants").update({checked_in:true}).eq("id",id);if(error)return showToast("Check-in failed!","error");showToast("Dancer checked in ✓");},[showToast]);
   const endEvent=async()=>{const{error}=await supabase.from("events").delete().eq("id",event.id);if(error)return showToast("Failed!","error");onBack();};
+  const saveRounds=async(newRounds)=>{
+    setRoundsSaving(true);
+    const{error}=await supabase.from("events").update({rounds:newRounds}).eq("id",event.id);
+    if(error){showToast("Failed to save rounds: "+error.message,"error");setRoundsSaving(false);return;}
+    setEventRounds(newRounds);
+    showToast("Round flow saved ✓");
+    setRoundsSaving(false);
+  };
 
   const downloadXLSX=(sheetData,filename)=>{
     const XLSX=window.XLSX;
@@ -2788,6 +2925,7 @@ function Dashboard({ event, memberName, onBack, showToast }) {
             {key:"judges",label:`JUDGES (${regJudges.length})`},
             {key:"checkin",label:"CHECK-IN"},
             {key:"host",label:"HOST"},
+            {key:"roundsetup",label:"⚡ ROUND SETUP"},
             {key:"scores",label:"SCORES (VIEW)"},
             {key:"bracket",label:"BRACKET"},
             {key:"leaderboard",label:"LEADERBOARD"},
@@ -2814,7 +2952,8 @@ function Dashboard({ event, memberName, onBack, showToast }) {
 
         {tab==="organizer"&&<OrganizerTab activeCat={activeCat} catSorted={catSorted} col={col} onAdd={addParticipant} getScore={getScore}/>}
         {tab==="attendees"&&<AttendeeTab event={event} col={col} showToast={showToast}/>}
-        {tab==="host"&&<HostTab event={event} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast}/>}
+        {tab==="host"&&<HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast}/>}
+        {tab==="roundsetup"&&<RoundSetupTab col={col} eventRounds={eventRounds} onSave={saveRounds} saving={roundsSaving} participants={participants} categories={categories}/>}
 
         {tab==="judges"&&(
           <div className="slide">
