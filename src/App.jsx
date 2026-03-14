@@ -578,6 +578,55 @@ function AdminLoginScreen({ onBack, onLogin, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // ADMIN DASHBOARD
 // ─────────────────────────────────────────────────────────────────
+// Shows judge codes for a single event in the admin list — loads on demand
+function AdminEventJudgeCodes({ eventId, categories }) {
+  const [open, setOpen] = useState(false);
+  const [codes, setCodes] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(null);
+  const copy = (val) => { navigator.clipboard?.writeText(val).catch(()=>{}); setCopied(val); setTimeout(()=>setCopied(null),1500); };
+
+  const load = async () => {
+    if (codes.length > 0) { setOpen(o=>!o); return; }
+    setLoading(true);
+    const { data } = await supabase.from("judge_codes").select("*").eq("event_id", eventId).order("category").order("slot");
+    setCodes(data||[]);
+    setLoading(false);
+    setOpen(true);
+  };
+
+  return (
+    <div style={{marginTop:10}}>
+      <button onClick={load} style={{background:"none",border:"none",cursor:"pointer",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",letterSpacing:1,padding:0,display:"flex",alignItems:"center",gap:5}}>
+        {loading?<span style={{display:"inline-block",width:10,height:10,border:"1px solid #7c3aed44",borderTopColor:"#c084fc",borderRadius:"50%",animation:"spinner .6s linear infinite"}}/>:<span>{open?"▲":"▼"}</span>}
+        {open?"HIDE JUDGE CODES":"SHOW JUDGE CODES"} ({categories.length} {categories.length===1?"category":"categories"})
+      </button>
+      {open&&codes.length>0&&(
+        <div style={{marginTop:8,display:"flex",flexWrap:"wrap",gap:6}}>
+          {codes.map(j=>{
+            const ci=categories.indexOf(j.category);
+            const c=PALETTE[ci>=0?ci%PALETTE.length:0];
+            return (
+              <div key={j.code} style={{background:"#0b0818",border:`1px solid ${c.border}`,borderRadius:6,padding:"5px 10px",display:"flex",alignItems:"center",gap:8}}>
+                <div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:c.primary,letterSpacing:1}}>{j.category} · J{j.slot}{j.judge_name?" · "+j.judge_name:""}</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:2,color:j.used?"#00c853":"#fff"}}>{j.code}</div>
+                </div>
+                <button onClick={()=>copy(j.code)} style={{background:"none",border:`1px solid ${c.border}`,borderRadius:4,color:c.primary,cursor:"pointer",fontFamily:"Bebas Neue,sans-serif",fontSize:9,padding:"2px 7px"}}>
+                  {copied===j.code?"✓":"COPY"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {open&&codes.length===0&&!loading&&(
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#3d2080",marginTop:6}}>No judge codes found for this event.</div>
+      )}
+    </div>
+  );
+}
+
 function AdminDashboard({ onBack, showToast }) {
   const [tab,setTab]=useState("events"); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true);
   const loadEvents=async()=>{setLoading(true);const{data}=await supabase.from("events").select("*").order("created_at",{ascending:false});setEvents(data||[]);setLoading(false);};
@@ -607,26 +656,36 @@ function AdminDashboard({ onBack, showToast }) {
             ):events.map(ev=>{
               const cats=ev.categories||[];
               return (
-                <div key={ev.id} style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"16px 20px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-                  <div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:2}}>{ev.name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginTop:2}}>{ev.city} · {ev.start_date||ev.date}{ev.end_date&&ev.end_date!==ev.start_date?" → "+ev.end_date:""}</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
-                      {cats.slice(0,5).map((cat,i)=>{const c=PALETTE[i%PALETTE.length];return <span key={cat} style={{fontFamily:"Barlow,sans-serif",fontSize:9,padding:"2px 8px",borderRadius:10,background:c.bg,border:`1px solid ${c.border}`,color:c.primary}}>{cat}</span>;})}
-                      {cats.length>5&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a"}}>+{cats.length-5} more</span>}
+                <div key={ev.id} style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"16px 20px",marginBottom:12}}>
+                  {/* Top row: name + delete */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:10}}>
+                    <div>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:2}}>{ev.name}</div>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginTop:2}}>{ev.city} · {ev.start_date||ev.date}{ev.end_date&&ev.end_date!==ev.start_date?" → "+ev.end_date:""}</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+                        {cats.slice(0,5).map((cat,i)=>{const c=PALETTE[i%PALETTE.length];return <span key={cat} style={{fontFamily:"Barlow,sans-serif",fontSize:9,padding:"2px 8px",borderRadius:10,background:c.bg,border:`1px solid ${c.border}`,color:c.primary}}>{cat}</span>;})}
+                        {cats.length>5&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a"}}>+{cats.length-5} more</span>}
+                      </div>
                     </div>
-                  </div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    <div style={{background:"#110d22",border:"1px solid #ff4d4d22",borderRadius:7,padding:"6px 12px"}}>
-                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",letterSpacing:2}}>ORG CODE</div>
-                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#ff4d4d",letterSpacing:2}}>{ev.org_code}</div>
-                    </div>
-                    {ev.viewer_code&&<div style={{background:"#110d22",border:"1px solid #00e5ff22",borderRadius:7,padding:"6px 12px"}}>
-                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",letterSpacing:2}}>VIEWER CODE</div>
-                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#00e5ff",letterSpacing:2}}>{ev.viewer_code}</div>
-                    </div>}
                     <button className="btn" style={{fontSize:10,background:"#150608",color:"#ff4d4d",border:"1px solid #ff4d4d33"}} onClick={()=>deleteEvent(ev.id,ev.name)}>DELETE</button>
                   </div>
+                  {/* All codes row */}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <div style={{background:"#0f0b1e",border:"1px solid #ff4d4d33",borderRadius:7,padding:"6px 12px"}}>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#ff4d4d88",letterSpacing:2,marginBottom:2}}>ORG CODE</div>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#ff4d4d",letterSpacing:2}}>{ev.org_code}</div>
+                    </div>
+                    {ev.viewer_code&&<div style={{background:"#0f0b1e",border:"1px solid #00e5ff33",borderRadius:7,padding:"6px 12px"}}>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#00e5ff88",letterSpacing:2,marginBottom:2}}>VIEWER CODE</div>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#00e5ff",letterSpacing:2}}>{ev.viewer_code}</div>
+                    </div>}
+                    {ev.emcee_code&&<div style={{background:"#0f0b1e",border:"1px solid #ff980033",borderRadius:7,padding:"6px 12px"}}>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#ff980088",letterSpacing:2,marginBottom:2}}>EMCEE CODE</div>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#ff9800",letterSpacing:2}}>{ev.emcee_code}</div>
+                    </div>}
+                  </div>
+                  {/* Judge codes (expandable) */}
+                  <AdminEventJudgeCodes eventId={ev.id} categories={cats}/>
                 </div>
               );
             })}
@@ -1666,12 +1725,12 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
   const allRounds  = event.rounds||["Prelims","Finals"];
   const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "attendee");
   const [showNotifHistory, setShowNotifHistory] = useState(false);
-  // Attendees only see knockout rounds — prelims are hidden
+  // Attendees see knockout rounds in selector; prelims shown as leaderboard when no knockout active
   const rounds     = allRounds.filter(r=>r!=="Prelims");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
   const [currentRound,setCurrentRound]=useState(rounds[0]||"");
   const col=getCatColor(categories,activeCat);
-  const isPrelim=false; // attendees never see prelims
+  const isPrelim=false; // attendees never see prelims scoring — only total leaderboard
 
   const [participants,setParticipants]=useState([]);
   const [scores,setScores]=useState([]);
@@ -1729,13 +1788,10 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {rounds.length>0?(
-              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-                {rounds.map(r=><option key={r}>{r}</option>)}
-              </select>
-            ):(
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",padding:"7px 12px",background:"#120e22",borderRadius:8,border:"1px solid #2a1840"}}>Knockout not started yet</div>
-            )}
+            <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+              <option value="">📊 Prelim Rankings</option>
+              {rounds.map(r=><option key={r}>{r}</option>)}
+            </select>
             <button className="btn" style={{background:"#1c1232",color:"#c084fc",border:"1px solid #7c3aed44",fontSize:11}} onClick={()=>{setLoading(true);Promise.all([supabase.from("participants").select("*").eq("event_id",event.id),supabase.from("scores").select("*").eq("event_id",event.id),supabase.from("battle_decisions").select("*").eq("event_id",event.id)]).then(([p,s,b])=>{if(p.data)setParticipants(p.data);if(s.data)setScores(s.data);if(b.data)setBattles(b.data);setLoading(false);})}}>🔄</button>
             <button className="btn" style={{background:"transparent",color:"#7755aa",border:"1px solid #2a1840",fontSize:11}} onClick={onBack}>← EXIT</button>
             <button className="btn" style={{background:showNotifHistory?"#ff980022":"transparent",color:"#ff9800",border:"1px solid #ff980033",fontSize:11,position:"relative"}} onClick={()=>setShowNotifHistory(p=>!p)}>
@@ -1771,9 +1827,35 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
             <>
               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:16}}>{currentRound} · {activeCat}</div>
               {!currentRound?(
-                <div style={{textAlign:"center",padding:"48px",background:"#0f0b1e",border:"1px solid #1a1a1a",borderRadius:12}}>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#3d2080",letterSpacing:2,marginBottom:8}}>KNOCKOUT ROUNDS NOT STARTED</div>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#3d2080"}}>Prelims are in progress. Knockout battles will appear here once the host starts the bracket.</div>
+                <div>
+                  <div style={{background:"#110d22",border:"1px solid #ffd70022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>
+                    🎵 Prelims in progress — live rankings update as judges score each dancer.
+                  </div>
+                  <div style={{background:"#0d0a1a",border:"1px solid #170f2c",borderRadius:12,overflow:"hidden"}}>
+                    {prelimRanked.length===0&&(
+                      <div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>Scoring in progress — rankings will appear here soon</div>
+                    )}
+                    {prelimRanked.map((p,i)=>(
+                      <div key={p.id} className="lrow" style={{background:i===0?"#091407":i===1?"#080f05":i===2?"#070d04":"transparent"}}>
+                        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#2a1840",minWidth:40}}>#{i+1}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div>
+                          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div>
+                        </div>
+                        {getScore(p.id)>0?(
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#55449a",letterSpacing:2,marginBottom:1}}>TOTAL</div>
+                            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:24,color:i<3?col.primary:"#fff",lineHeight:1}}>{getScore(p.id)}</div>
+                          </div>
+                        ):(
+                          <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#3d2080"}}>scoring…</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#3d2080",textAlign:"center",marginTop:10}}>
+                    Showing total score only · Individual judge scores are private
+                  </div>
                 </div>
               ):(
                 <div style={{display:"flex",flexDirection:"column",gap:14}}>
