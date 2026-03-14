@@ -2790,11 +2790,8 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
 // ─────────────────────────────────────────────────────────────────
 function Dashboard({ event, memberName, onBack, showToast }) {
   const categories = event.categories||[];
-  // rounds is kept in sync with eventRounds state so organizer changes reflect immediately
-  const rounds = eventRounds;
   const [tab,setTab]=useState("organizer");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
-  const [currentRound,setCurrentRound]=useState(rounds[0]||"Prelims");
   const [searchQr,setSearchQr]=useState(""); const [showQrFor,setShowQrFor]=useState(null);
   const [overlayActive,setOverlayActive]=useState(false); const [showConfirm,setShowConfirm]=useState(false);
   const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "organizer");
@@ -2807,6 +2804,10 @@ function Dashboard({ event, memberName, onBack, showToast }) {
   const [loading,setLoading]=useState(true);
   const [eventRounds,setEventRounds]=useState(event.rounds||["Prelims"]);
   const [roundsSaving,setRoundsSaving]=useState(false);
+
+  // rounds always stays in sync with eventRounds state
+  const rounds = eventRounds||["Prelims"];
+  const [currentRound,setCurrentRound]=useState((event.rounds||["Prelims"])[0]||"Prelims");
 
   const loadDashboard=useCallback(async()=>{
     setLoading(true);
