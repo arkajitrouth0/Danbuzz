@@ -748,12 +748,20 @@ function AdminCreateEvent({ showToast, onCreated }) {
             </div>
           </div>
           <div style={{background:"#110d22",border:"1px solid #00e5ff44",borderRadius:12,padding:20}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>ATTENDEE CODE</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>VIEWER CODE</div>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,letterSpacing:3,color:"#00e5ff"}}>{createdEvent.viewer_code}</div>
               <button className="btn" style={{fontSize:10,padding:"6px 14px",background:"transparent",border:"1px solid #00e5ff44",color:"#00e5ff"}} onClick={()=>copy(createdEvent.viewer_code)}>{copied===createdEvent.viewer_code?"✓ COPIED":"COPY"}</button>
             </div>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",marginTop:4}}>Share with attendees for live event updates</div>
+          </div>
+          <div style={{background:"#110d22",border:"1px solid #ff980044",borderRadius:12,padding:20,gridColumn:"1 / -1"}}>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff9800",letterSpacing:3,marginBottom:8}}>🎤 EMCEE CODE</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,letterSpacing:5,color:"#ff9800"}}>{createdEvent.emcee_code}</div>
+              <button className="btn" style={{fontSize:10,padding:"6px 14px",background:"transparent",border:"1px solid #ff980044",color:"#ff9800"}} onClick={()=>copy(createdEvent.emcee_code)}>{copied===createdEvent.emcee_code?"✓ COPIED":"COPY"}</button>
+            </div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",marginTop:4}}>Separate code for Emcee only — different from the viewer code</div>
           </div>
         </div>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:3,marginBottom:14}}>JUDGE CODES</div>
