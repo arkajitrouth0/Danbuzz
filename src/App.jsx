@@ -2178,11 +2178,10 @@ function ParticipantFeedbackView({ event, participant, allRounds, col }) {
           .eq("participant_id", participant.id)
           .order("created_at", { ascending: false }),
         supabase.from("scores").select("*")
-          .eq("event_id", event.id)
-          .eq("participant_id", participant.id),
+          .eq("event_id", event.id),
       ]);
       setFeedbacks(fbRes.data || []);
-      setScores(scRes.data || []);
+      setScores((scRes.data || []).filter(s => s.participant_id === participant.id));
       setLoading(false);
     };
     load();
