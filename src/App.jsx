@@ -157,6 +157,9 @@ const getJudgeCount = (judgeCodes, category) =>
 // Helper: resolve battle requiring all registered judges to have voted
 const resolveBattleForCategory = (decisions, judgeCodes, category) =>
   resolveBattle(decisions, getJudgeCount(judgeCodes, category));
+
+// Get the ordered list of rounds from the event (excluding Prelims)
+const getKnockoutRounds = (eventRounds) =>
   (eventRounds || []).filter(r => r !== "Prelims");
 
 // Given prelim-ranked list, build the battles for the FIRST knockout round.
@@ -3144,10 +3147,10 @@ function Dashboard({ event, memberName, onBack, showToast }) {
   const [loading,setLoading]=useState(true);
   const [eventRounds,setEventRounds]=useState(event.rounds||["Prelims"]);
   const [roundsSaving,setRoundsSaving]=useState(false);
+  const [currentRound,setCurrentRound]=useState((event.rounds||["Prelims"])[0]||"Prelims");
 
   // rounds always stays in sync with eventRounds state
   const rounds = eventRounds||["Prelims"];
-  const [currentRound,setCurrentRound]=useState((event.rounds||["Prelims"])[0]||"Prelims");
 
   const loadDashboard=useCallback(async()=>{
     setLoading(true);
