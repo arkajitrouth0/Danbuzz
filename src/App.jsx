@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Component } from "react";
 import { supabase } from "./supabase";
 
 // ─────────────────────────────────────────────────────────────────
@@ -1921,22 +1921,23 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
     return ()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);};
   },[event.id]);
 
-  const scoreMap={};
-  scores.forEach(s=>{if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score;});
-  const getScore=(pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;};
-  const checkedIn=participants.filter(p=>p.category===activeCat&&p.checked_in);
-  const prelimRanked=[...checkedIn].sort((a,b)=>{
+  const scoreMap = useMemo(()=>{
+    const m={};
+    scores.forEach(s=>{if(!m[s.participant_id])m[s.participant_id]={};m[s.participant_id][s.judge_key]=s.score;});
+    return m;
+  },[scores]);
+  const getScore = useCallback((pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;},[scoreMap]);
+  const checkedIn = useMemo(()=>participants.filter(p=>p.category===activeCat&&p.checked_in),[participants,activeCat]);
+  const prelimRanked = useMemo(()=>[...checkedIn].sort((a,b)=>{
     const sa=getScore(a.id),sb=getScore(b.id);
     if(sb!==sa)return sb-sa;
     const aMax=Math.max(0,...Object.values(scoreMap[a.id]||{}));
     const bMax=Math.max(0,...Object.values(scoreMap[b.id]||{}));
     if(bMax!==aMax)return bMax-aMax;
     return a.name.localeCompare(b.name);
-  });
-  const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
-  // rounds now includes all (Prelims + knockout) for selector
-  const allSelectableRounds = allRounds;
-  const currentBattles=currentRound&&currentRound!=="Prelims"?buildRoundBattles(currentRound, allRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap):[];
+  }),[checkedIn,getScore,scoreMap]);
+  const participantMap = useMemo(()=>{const m={};participants.forEach(p=>{m[p.id]=p;});return m;},[participants]);
+  const currentBattles = useMemo(()=>currentRound&&currentRound!=="Prelims"?buildRoundBattles(currentRound, allRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap):[],[currentRound,allRounds,prelimRanked,battles,activeCat,participantMap]);
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
 
@@ -2147,33 +2148,36 @@ function EmceeDashboard({ event, emceeName, onBack }) {
     return()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);supabase.removeChannel(evCh);};
   },[event.id]);
 
-  const scoreMap={};
-  scores.forEach(s=>{if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score;});
-  const getScore=(pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;};
-  const catParts     = participants.filter(p=>p.category===activeCat);
-  const checkedIn    = catParts.filter(p=>p.checked_in);
-  const prelimRanked = [...checkedIn].sort((a,b)=>{
+  const scoreMap = useMemo(()=>{
+    const m={};
+    scores.forEach(s=>{if(!m[s.participant_id])m[s.participant_id]={};m[s.participant_id][s.judge_key]=s.score;});
+    return m;
+  },[scores]);
+  const getScore = useCallback((pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;},[scoreMap]);
+  const catParts     = useMemo(()=>participants.filter(p=>p.category===activeCat),[participants,activeCat]);
+  const checkedIn    = useMemo(()=>catParts.filter(p=>p.checked_in),[catParts]);
+  const prelimRanked = useMemo(()=>[...checkedIn].sort((a,b)=>{
     const sa=getScore(a.id),sb=getScore(b.id);
     if(sb!==sa)return sb-sa;
     const aMax=Math.max(0,...Object.values(scoreMap[a.id]||{}));
     const bMax=Math.max(0,...Object.values(scoreMap[b.id]||{}));
     if(bMax!==aMax)return bMax-aMax;
     return a.name.localeCompare(b.name);
-  });
-  const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
-  const knockoutRounds = (eventRounds||[]).filter(r=>r!=="Prelims");
+  }),[checkedIn,getScore,scoreMap]);
+  const participantMap = useMemo(()=>{const m={};participants.forEach(p=>{m[p.id]=p;});return m;},[participants]);
+  const knockoutRounds = useMemo(()=>(eventRounds||[]).filter(r=>r!=="Prelims"),[eventRounds]);
 
   // Last call: participants not checked in
-  const notCheckedIn = catParts.filter(p=>!p.checked_in&&!p.disqualified);
+  const notCheckedIn = useMemo(()=>catParts.filter(p=>!p.checked_in&&!p.disqualified),[catParts]);
 
   // Finals winner detection
   const finalsRound = knockoutRounds[knockoutRounds.length-1];
-  const finalsDecided = finalsRound && (()=>{
+  const finalsDecided = useMemo(()=>finalsRound && (()=>{
     const decs=battles.filter(b=>b.category===activeCat&&b.round===finalsRound);
     if(!decs.length)return false;
     const mi=[...new Set(decs.map(d=>d.match_index))][0];
     return resolveBattle(decs.filter(d=>d.match_index===mi)).status==="decided";
-  })();
+  })(),[finalsRound,battles,activeCat]);
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
 
@@ -3247,7 +3251,7 @@ function Dashboard({ event, memberName, onBack, showToast }) {
     setLoading(false);
   },[event.id]);
 
-  useEffect(()=>{ loadDashboard(); },[loadDashboard]);
+  useEffect(()=>{ loadDashboard(); },[event.id]);
 
   useEffect(()=>{
     const jcCh=supabase.channel(`jc-${event.id}`).on("postgres_changes",{event:"UPDATE",schema:"public",table:"judge_codes",filter:`event_id=eq.${event.id}`},(p)=>setJudgeCodes(prev=>prev.map(j=>j.id===p.new.id?p.new:j))).subscribe();
@@ -3700,9 +3704,43 @@ function Dashboard({ event, memberName, onBack, showToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// ERROR BOUNDARY — catches runtime crashes and shows reload button
+// instead of white screen
+// ─────────────────────────────────────────────────────────────────
+class ErrorBoundary extends Component {
+  constructor(props){super(props);this.state={hasError:false,error:null};}
+  static getDerivedStateFromError(error){return{hasError:true,error};}
+  componentDidCatch(error,info){console.error("DanBuzz crash:",error,info);}
+  render(){
+    if(this.state.hasError){
+      return(
+        <div style={{minHeight:"100vh",background:"#0a0612",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,padding:32,textAlign:"center"}}>
+          <style>{`@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;600&display=swap');`}</style>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:48,letterSpacing:5,color:"#fff"}}>DAN<span style={{color:"#ff4d4d"}}>BUZZ</span></div>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:"#ff4d4d",letterSpacing:3}}>SOMETHING WENT WRONG</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:13,color:"#7755aa",maxWidth:400}}>
+            The app hit an unexpected error. Tap below to reload — your data is safe in Supabase.
+          </div>
+          <button onClick={()=>window.location.reload()}
+            style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,padding:"14px 32px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>
+            🔄 RELOAD APP
+          </button>
+          {this.state.error&&(
+            <div style={{fontFamily:"monospace",fontSize:10,color:"#3d2080",maxWidth:500,wordBreak:"break-all"}}>
+              {this.state.error.message}
+            </div>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // ROOT
 // ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AppInner() {
   const [screen,setScreen]=useState("loading");
   const [activeEvent,setActiveEvent]=useState(null);
   const [judgeData,setJudgeData]=useState(null);
@@ -3745,4 +3783,8 @@ export default function App() {
       {screen==="dashboard"       &&activeEvent&&<Dashboard event={activeEvent} memberName={orgMemberName} onBack={()=>{setActiveEvent(null);setOrgMemberName(null);setScreen("landing");}} showToast={showToast}/>}
     </div>
   );
+}
+
+export default function App() {
+  return <ErrorBoundary><AppInner/></ErrorBoundary>;
 }
