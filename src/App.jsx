@@ -4,8 +4,8 @@ import { supabase } from "./supabase";
 // ─────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────
-const ALL_POST_PRELIM_ROUNDS = ["Top 32", "Top 27", "Top 24", "Top 20", "Top 18", "Top 16", "Top 15", "Top 12", "Top 10", "Top 8", "Top 6", "Top 4", "Finals"];
-const ROUND_LIMIT = { Prelims: 999, "Top 32": 32, "Top 27": 27, "Top 24": 24, "Top 20": 20, "Top 18": 18, "Top 16": 16, "Top 15": 15, "Top 12": 12, "Top 10": 10, "Top 8": 8, "Top 6": 6, "Top 4": 4, Finals: 2 };
+const ALL_POST_PRELIM_ROUNDS = ["Top 32", "Top 16", "Top 8", "Finals"];
+const ROUND_LIMIT = { Prelims: 999, "Top 32": 32, "Top 16": 16, "Top 8": 8, Finals: 2 };
 
 // getRoundSize: get the number of dancers in a round (handles any custom round name like "Top 25")
 const getRoundSize = (roundName) => {
@@ -87,20 +87,29 @@ const detectBias = (scoreMap={}) => {
 // ─────────────────────────────────────────────────────────────────
 
 // ── KNOCKOUT JUDGE DECISION ENGINE ─────────────────────────────
+// IMPORTANT: A battle is only resolved once ALL registered judges for
+// that category have submitted their decision. One judge cannot decide alone.
+//
 // 5 rules (2-way and 3-way battles):
 //   a) UNANIMOUS  — all judges pick same dancer → that dancer wins
 //   b) MAJORITY   — more judges pick A than any other choice → A wins
 //   c) ALL TIE    — every judge submits a tie card → re-battle
-//   d) SPLIT EVEN — even number of judges, two dancers tied in wins
-//                   (regardless of tie votes) → re-battle
-//   e) TIE + WIN  — one judge picks X, one judge marks tie (no other picks) → X wins
-//                   (tie vote only counts as a real tie when it creates a genuine deadlock)
-// Only resolves once ALL registered judges for that category have voted.
-const resolveBattle = (decisions = []) => {
+//   d) SPLIT EVEN — two dancers tied in wins → re-battle
+//   e) TIE + WIN  — tie votes only block if they create a genuine deadlock
+//
+// totalRegisteredJudges: the number of judge codes registered for this category.
+// Until all judges have voted, status remains "pending".
+const resolveBattle = (decisions = [], totalRegisteredJudges = 0) => {
   if (!decisions.length) return { status: "pending", tie_round: 0 };
   const maxTieRound = Math.max(...decisions.map(d => d.tie_round ?? 0));
   const current = decisions.filter(d => (d.tie_round ?? 0) === maxTieRound);
   if (!current.length) return { status: "pending", tie_round: maxTieRound };
+
+  // CORE FIX: If we know the total judges, wait until ALL have voted
+  // Only proceed to resolve if every registered judge has submitted
+  if (totalRegisteredJudges > 0 && current.length < totalRegisteredJudges) {
+    return { status: "pending", tie_round: maxTieRound, votesIn: current.length, totalJudges: totalRegisteredJudges };
+  }
 
   const p1Id = current[0].p1_id;
   const p2Id = current[0].p2_id;
@@ -121,37 +130,33 @@ const resolveBattle = (decisions = []) => {
   }
 
   // Rule (a) + (b): unanimous or clear majority
-  // Count how many dancers share the max win count (excluding tie)
   const leadersCount = allParticipantWins.filter(w => w === maxWins).length;
 
   if (maxWins > 0 && leadersCount === 1) {
-    // One dancer leads — check rule (e): ties only block if they would flip the result
-    // If winning dancer's wins > tieVotes, they win outright (ties can't swing it)
-    // If winning dancer's wins <= tieVotes, it's still a tie deadlock
     const leader = p3Id
       ? (p1Wins===maxWins ? {id:p1Id, name:current[0].p1_name}
         : p2Wins===maxWins ? {id:p2Id, name:current[0].p2_name}
         : {id:p3Id, name:current[0].p3_name})
       : (p1Wins===maxWins ? {id:p1Id, name:current[0].p1_name} : {id:p2Id, name:current[0].p2_name});
-
-    // Rule (e): if 1 judge gave win to X and 1 judge gave tie → X wins
-    // More generally: leader wins > 0 and no other dancer ties the lead
     return { status: "decided", winner_id: leader.id, winner_name: leader.name, tie_round: maxTieRound };
   }
 
-  // Rule (d): even number of judges, two+ dancers tied in wins → re-battle
-  // Also handles odd judges where tie votes create deadlock
+  // Rule (d): two+ dancers tied → re-battle
   if (leadersCount > 1) {
-    // Check if tie votes could resolve the deadlock (they cannot — they just re-battle)
     return { status: "tied", winner_id: null, winner_name: null, tie_round: maxTieRound };
   }
 
-  // No votes yet from all judges / only tie votes with no winner
+  // Still waiting
   return { status: "pending", tie_round: maxTieRound };
 };
 
-// Get the ordered list of rounds from the event (excluding Prelims)
-const getKnockoutRounds = (eventRounds) =>
+// Helper: get total registered judges for a category
+const getJudgeCount = (judgeCodes, category) =>
+  (judgeCodes||[]).filter(j => j.category === category && j.used).length;
+
+// Helper: resolve battle requiring all registered judges to have voted
+const resolveBattleForCategory = (decisions, judgeCodes, category) =>
+  resolveBattle(decisions, getJudgeCount(judgeCodes, category));
   (eventRounds || []).filter(r => r !== "Prelims");
 
 // Given prelim-ranked list, build the battles for the FIRST knockout round.
@@ -1336,12 +1341,13 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
               Tap a name card to vote. Battles with 3 dancers pick 1 winner from all three.
             </div>
             <div style={{background:"#1a1a0a",border:"1px solid #ffd70033",borderRadius:8,padding:"8px 14px",marginBottom:20,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>
-              ⚡ Each battle is judged independently. The winner advances to the next round.
+              ⚡ Battle is decided only after <strong>ALL judges</strong> have voted. Your vote counts but the result waits for everyone.
             </div>
             {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No battles yet — prelim scores needed to seed matchups.</div>}
             {currentBattles.map(battle=>{
+              const totalJudgesForCat = judgeCodes.filter(j=>j.used).length;
               const allDecs        = getBattleDecisions(battle.match_index);
-              const resolved       = resolveBattle(allDecs);
+              const resolved       = resolveBattle(allDecs, totalJudgesForCat);
               const activeTieRound = resolved.tie_round ?? 0;
               const currentTieRound = resolved.status === "tied" ? activeTieRound + 1 : activeTieRound;
               const myDec          = getMyDecision(battle.match_index, currentTieRound);
@@ -1353,6 +1359,7 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
               const tieChosen      = uiChoice?.is_tie ?? (!!myDec && myDec.is_tie);
               const isTieBreaker   = currentTieRound > 0;
               const isDecided      = resolved.status === "decided";
+              const currentVotes   = allDecs.filter(d=>(d.tie_round??0)===currentTieRound).length;
 
               return (
                 <div key={battle.match_index} className="battle-card" style={{opacity:isDecided?0.75:1,marginBottom:20}}>
@@ -1366,7 +1373,12 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                       {isTieBreaker&&<span className="badge" style={{background:"#ffd70022",color:"#ffd700",border:"1px solid #ffd70044"}}>🔄 TIE BREAK ×{currentTieRound}</span>}
                       {isDecided&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ DECIDED</span>}
                       {resolved.status==="tied"&&<span className="badge" style={{background:"#ffd70022",color:"#ffd700",border:"1px solid #ffd70044"}}>🤝 TIE — EXTRA BATTLE</span>}
-                      {myDec&&!isDecided&&resolved.status!=="tied"&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ VOTED</span>}
+                      {!isDecided&&resolved.status!=="tied"&&totalJudgesForCat>0&&(
+                        <span className="badge" style={{background:currentVotes===totalJudgesForCat?"#00c85322":"#1c1232",color:currentVotes===totalJudgesForCat?"#00c853":"#7755aa",border:`1px solid ${currentVotes===totalJudgesForCat?"#00c85344":"#3d2080"}`}}>
+                          {currentVotes}/{totalJudgesForCat} VOTED
+                        </span>
+                      )}
+                      {myDec&&!isDecided&&resolved.status!=="tied"&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ MY VOTE IN</span>}
                     </div>
                   </div>
 
@@ -1663,8 +1675,9 @@ function AttendeeTab({ event, col, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // ORGANIZER: Bracket view — reads battle_decisions, shows majority winner
 // ─────────────────────────────────────────────────────────────────
-function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showToast }) {
+function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showToast, judgeCodes }) {
   const rounds = (event.rounds||[]).filter(r=>r!=="Prelims");
+  const totalJudgesForCat = (judgeCodes||[]).filter(j=>j.category===activeCat&&j.used).length;
 
   const [battles,setBattles] = useState([]);
   const [loading,setLoading] = useState(true);
@@ -1702,7 +1715,7 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
               const prevBattles = buildRoundBattles(prev, event.rounds||[], prelimRanked, battles, participantMap);
               return prevBattles.length > 0 && prevBattles.every(b=>{
                 const decs = battles.filter(d=>d.round===prev&&d.match_index===b.match_index);
-                return resolveBattle(decs).status==="decided";
+                return resolveBattle(decs, totalJudgesForCat).status==="decided";
               });
             })();
             return (
@@ -1716,10 +1729,13 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
                   const fighters = [battle.p1, battle.p2, ...(battle.p3?[battle.p3]:[])];
                   const is3way = !!battle.p3;
                   const decs   = battles.filter(b=>b.round===roundName&&b.match_index===battle.match_index);
-                  const result = resolveBattle(decs);
-                  const judgeCount = [...new Set(decs.filter(d=>(d.tie_round??0)===result.tie_round).map(d=>d.judge_key))].length;
+                  const result = resolveBattle(decs, totalJudgesForCat);
+                  const votedCount = [...new Set(decs.filter(d=>(d.tie_round??0)===(result.tie_round??0)).map(d=>d.judge_key))].length;
                   const isTied = result.status === "tied";
                   const isDecided = result.status === "decided";
+                  const pendingLabel = totalJudgesForCat > 0
+                    ? `${votedCount}/${totalJudgesForCat} judges voted`
+                    : `${votedCount} judge${votedCount!==1?"s":""} voted`;
                   return (
                     <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
                       {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
@@ -1738,7 +1754,7 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
                         );
                       })}
                       <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:isTied?"#ffd700":isDecided?"#00c853":"#55449a"}}>
-                        {isTied?`🤝 TIE × ${result.tie_round+1} — extra battle needed`:isDecided?`🏆 ${result.winner_name} advances`:`${judgeCount} judge${judgeCount!==1?"s":""} voted`}
+                        {isTied?`🤝 TIE × ${result.tie_round+1} — extra battle needed`:isDecided?`🏆 ${result.winner_name} advances`:pendingLabel}
                       </div>
                     </div>
                   );
@@ -2507,7 +2523,7 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
     <div className="slide">
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>⚡ ROUND SETUP</div>
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#9980cc",marginBottom:20}}>
-        Configure which knockout rounds happen after Prelims. Any combination is valid — odd pools create 1 three-way battle automatically.
+        Configure the knockout rounds that happen after Prelims.
       </div>
 
       {/* Participant count hint */}
@@ -2521,35 +2537,35 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginTop:2}}>CHECKED IN</div>
         </div>
         <div style={{flex:1,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",display:"flex",alignItems:"center"}}>
-          {totalCheckedIn>=32?"💡 32+ dancers → Top 32 → Top 16 → Top 8 → Top 4 → Finals recommended"
-          :totalCheckedIn>=16?"💡 16–31 dancers → Top 16 → Top 8 → Top 4 → Finals recommended"
-          :totalCheckedIn>=8?"💡 8–15 dancers → Top 8 → Top 4 → Finals recommended"
-          :totalCheckedIn>=4?"💡 4–7 dancers → Top 4 → Finals recommended"
-          :"💡 Under 4 checked in — Finals only recommended"}
+          {totalCheckedIn>=32?"💡 Recommended: Top 32 → Top 16 → Top 8 → Finals"
+          :totalCheckedIn>=16?"💡 Recommended: Top 16 → Top 8 → Finals"
+          :totalCheckedIn>=8?"💡 Recommended: Top 8 → Finals"
+          :"💡 Recommended: Finals only"}
         </div>
       </div>
 
-      {/* Round toggles */}
+      {/* Round toggles — only Top 32, Top 16, Top 8, Finals */}
       <div style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"18px 20px",marginBottom:16}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>SELECT KNOCKOUT ROUNDS AFTER PRELIMS</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:16}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>SELECT KNOCKOUT ROUNDS</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:12,marginBottom:16}}>
           {ALL_POST_PRELIM_ROUNDS.map(r => {
             const isOn = selected.includes(r);
-            const limit = getRoundSize(r);
-            const fits = limit === 2 || totalCheckedIn === 0 || totalCheckedIn >= limit * 0.5;
+            const size = getRoundSize(r);
+            const enoughDancers = totalCheckedIn === 0 || totalCheckedIn >= size * 0.5;
             return (
               <button key={r}
                 onClick={()=>toggle(r)}
                 style={{
-                  fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,
-                  padding:"10px 20px",borderRadius:8,cursor:"pointer",transition:"all .15s",
+                  fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:2,
+                  padding:"14px 28px",borderRadius:10,cursor:"pointer",transition:"all .15s",
                   background:isOn?col.bg:"#160e2a",
                   border:`2px solid ${isOn?col.primary:"#3d2080"}`,
                   color:isOn?col.primary:"#55449a",
+                  opacity:(!enoughDancers&&!isOn)?0.4:1,
                 }}>
                 {isOn?"✓ ":""}{r}
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:isOn?col.primary+"aa":"#3d2080",letterSpacing:0,marginTop:2}}>
-                  {r==="Finals"?"2 dancers":`${getRoundSize(r)} dancers`}
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:isOn?col.primary+"aa":"#3d2080",letterSpacing:0,marginTop:3}}>
+                  {r==="Finals"?"2 dancers":`${size} dancers`}
                 </div>
               </button>
             );
@@ -2563,13 +2579,13 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
             {fullFlow.map((r,i) => (
               <span key={r} style={{display:"flex",alignItems:"center",gap:8}}>
                 <span style={{
-                  fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,
-                  padding:"4px 12px",borderRadius:6,
+                  fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,
+                  padding:"5px 14px",borderRadius:6,
                   background:r==="Prelims"?"#1a1428":col.bg,
                   border:`1px solid ${r==="Prelims"?"#ffd70033":col.border}`,
                   color:r==="Prelims"?"#ffd700":col.primary
                 }}>{r}</span>
-                {i < fullFlow.length-1 && <span style={{color:"#3d2080",fontSize:12}}>→</span>}
+                {i < fullFlow.length-1 && <span style={{color:"#3d2080",fontSize:14}}>→</span>}
               </span>
             ))}
             {orderedSelected.length===0 && <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d"}}>⚠ Select at least one knockout round</span>}
@@ -2582,18 +2598,15 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>QUICK PRESETS</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {[
-            {label:"Top 4 → Finals",rounds:["Top 4","Finals"]},
-            {label:"Top 8 → Finals",rounds:["Top 8","Top 4","Finals"]},
-            {label:"Top 16 → Finals",rounds:["Top 16","Top 8","Top 4","Finals"]},
-            {label:"Top 32 → Finals",rounds:["Top 32","Top 16","Top 8","Top 4","Finals"]},
-            {label:"Top 15 → Top 7 → Finals",rounds:["Top 15","Finals"]},
-            {label:"Top 18 → Top 8 → Finals",rounds:["Top 18","Top 8","Finals"]},
-            {label:"Top 27 → Top 12 → Finals",rounds:["Top 27","Top 12","Finals"]},
+            {label:"Top 8 → Finals",rounds:["Top 8","Finals"]},
+            {label:"Top 16 → Top 8 → Finals",rounds:["Top 16","Top 8","Finals"]},
+            {label:"Top 32 → Top 16 → Finals",rounds:["Top 32","Top 16","Finals"]},
+            {label:"Top 32 → Top 16 → Top 8 → Finals",rounds:["Top 32","Top 16","Top 8","Finals"]},
             {label:"Finals Only",rounds:["Finals"]},
           ].map(p=>(
             <button key={p.label}
               onClick={()=>{setSelected(p.rounds);setHasChanges(true);}}
-              style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"6px 14px",borderRadius:6,
+              style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"7px 16px",borderRadius:6,
                 background:"#160e2a",border:"1px solid #3d2080",color:"#9980cc",cursor:"pointer",
                 transition:"all .15s"}}>
               {p.label}
@@ -2626,7 +2639,7 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
 // ─────────────────────────────────────────────────────────────────
 // HOST DASHBOARD TAB — live event flow controller
 // ─────────────────────────────────────────────────────────────────
-function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast }) {
+function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast, judgeCodes }) {
   const allRounds  = eventRounds || event.rounds || ["Prelims"];
   const knockoutRounds = allRounds.filter(r => r !== "Prelims");
 
@@ -2680,16 +2693,12 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
   const totalIn = checkedIn.length;
   const parsed  = parseInt(advanceN);
 
-  // ANY number ≥ 2 up to totalIn is valid.
-  // Odd numbers: the middle battle becomes a 3-way (handled by buildBattlesFromSeeds).
-  const maxAllowedBracket = totalIn;
-
   const validN       = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn;
-  const bracketTooLarge = false; // no cap — any number is allowed
+  const bracketTooLarge = false;
   const activeN      = confirmed && validN ? parsed : null;
 
-  // Quick pick buttons — common bracket sizes
-  const quickOpts = [4,6,8,10,12,15,16,18,20,24,27,32].filter(n => n <= totalIn);
+  // Fixed bracket sizes: Top 8, Top 16, Top 32 only (plus manual)
+  const quickOpts = [8, 16, 32].filter(n => n <= totalIn);
   const advancing  = activeN ? prelimRanked.slice(0, activeN) : [];
 
   // Active rounds: all configured knockout rounds (any size allowed — host chose them in round setup)
@@ -2705,14 +2714,17 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
   };
 
   // Resolve a battle, also checking host force-overrides
-  const resolveWithForce = (roundName, matchIndex, decs, roundBattles) => {
+  // judgeCodes prop passed from Dashboard has all judge codes
+  const resolveWithForce = (roundName, matchIndex, decs) => {
     const forceKey = `${roundName}-${matchIndex}`;
     const forced = forceWinners[forceKey];
     if (forced) {
       const p = participantMap[forced];
       return { status: "decided", winner_id: forced, winner_name: p?.name || "?", tie_round: 0, forced: true };
     }
-    return resolveBattle(decs);
+    // Use registered judge count so battle waits for all judges
+    const judgeCount = (event.judge_counts?.[activeCat]) || judgeCodes?.filter(j=>j.category===activeCat&&j.used).length || 0;
+    return resolveBattle(decs, judgeCount);
   };
 
   // Get seeded list entering a round, respecting force-overrides
@@ -2864,22 +2876,28 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
 
               <div style={{background:"#0b0818",border:"1px solid #2a1f4a",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:6}}>HOW MANY ADVANCE TO KNOCKOUT?</div>
-                {totalIn>0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginBottom:10,padding:"5px 10px",background:"#0b0818",borderRadius:6,border:"1px solid #161616"}}>
-                  📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Any number 2–{totalIn} is valid · Odd count = 1 three-way battle
+                {totalIn>0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginBottom:12,padding:"5px 10px",background:"#0b0818",borderRadius:6,border:"1px solid #161616"}}>
+                  📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Choose a standard bracket or set manually
                 </div>}
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>STANDARD BRACKETS</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
                   {quickOpts.map(n=>(
                     <button key={n} onClick={()=>{setAdvanceN(String(n));setConfirmed(false);}}
-                      style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,padding:"7px 16px",borderRadius:8,
-                        border:`1px solid ${advanceN===String(n)?col.primary:"#3d2080"}`,
+                      style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,padding:"10px 22px",borderRadius:8,
+                        border:`2px solid ${advanceN===String(n)?col.primary:"#3d2080"}`,
                         background:advanceN===String(n)?col.bg:"#160e2a",
                         color:advanceN===String(n)?col.primary:"#7755aa",cursor:"pointer",transition:"all .15s"}}>
                       TOP {n}
                     </button>
                   ))}
-                  <input className="inp" type="number" min={2} max={totalIn} placeholder={`2–${totalIn}`}
+                  {quickOpts.length===0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a"}}>Not enough dancers for standard brackets — use manual</div>}
+                </div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:6}}>MANUAL (ANY NUMBER)</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+                  <input className="inp" type="number" min={2} max={totalIn} placeholder={`Enter 2–${totalIn}`}
                     value={advanceN} onChange={e=>{setAdvanceN(e.target.value);setConfirmed(false);}}
-                    style={{width:80,fontFamily:"Bebas Neue,sans-serif",fontSize:14}}/>
+                    style={{width:120,fontFamily:"Bebas Neue,sans-serif",fontSize:16}}/>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>dancers advance</div>
                 </div>
                 {validN&&!confirmed&&(
                   <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
@@ -3428,7 +3446,7 @@ function Dashboard({ event, memberName, onBack, showToast }) {
               });
               return finalsOk?<WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={eventRounds}/>:null;
             })()}
-            <HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast}/>
+            <HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast} judgeCodes={judgeCodes}/>
           </>
         )}
         {tab==="roundsetup"&&<RoundSetupTab col={col} eventRounds={eventRounds} onSave={saveRounds} saving={roundsSaving} participants={participants} categories={categories}/>}
@@ -3567,7 +3585,7 @@ function Dashboard({ event, memberName, onBack, showToast }) {
           </div>
         )}
 
-        {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} showToast={showToast}/>}
+        {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} showToast={showToast} judgeCodes={judgeCodes}/>}
 
         {tab==="notifications"&&(
           <div className="slide">
