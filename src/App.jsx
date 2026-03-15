@@ -660,7 +660,7 @@ function LandingScreen({ onAdminLogin, onOrgLogin, onJudgeLogin, onViewerLogin, 
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#3d2080",marginTop:-6,marginBottom:2}}>Code sent to you by DanBuzz team</div>
         <button className="btn" style={{background:"#120e22",color:"#c0a8e8",border:"1px solid #2a1840",fontSize:13,padding:"14px"}} onClick={onJudgeLogin}>⚖️ JUDGE LOGIN</button>
         <button className="btn" style={{background:"#120e22",color:"#ff9800",border:"1px solid #ff980033",fontSize:13,padding:"14px"}} onClick={onEmceeLogin}>🎤 EMCEE DASHBOARD</button>
-        <button className="btn" style={{background:"#120e22",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onViewerLogin}>🎟 ATTENDEE LIVE VIEW</button>
+        <button className="btn" style={{background:"#120e22",color:"#00e5ff",border:"1px solid #00e5ff33",fontSize:13,padding:"14px"}} onClick={onViewerLogin}>🎟 VIEWER / PARTICIPANT LOGIN</button>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#3d2080",marginTop:4}}>First time as a judge? Judge Login handles registration too.</div>
       </div>
       <div style={{marginTop:52,borderTop:"1px solid #111",paddingTop:20}}>
@@ -876,12 +876,12 @@ function AdminCreateEvent({ showToast, onCreated }) {
             </div>
           </div>
           <div style={{background:"#110d22",border:"1px solid #00e5ff44",borderRadius:12,padding:20}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>VIEWER CODE</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#00e5ff",letterSpacing:3,marginBottom:8}}>VIEWER & PARTICIPANT CODE</div>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,letterSpacing:3,color:"#00e5ff"}}>{createdEvent.viewer_code}</div>
               <button className="btn" style={{fontSize:10,padding:"6px 14px",background:"transparent",border:"1px solid #00e5ff44",color:"#00e5ff"}} onClick={()=>copy(createdEvent.viewer_code)}>{copied===createdEvent.viewer_code?"✓ COPIED":"COPY"}</button>
             </div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",marginTop:4}}>Share with attendees for live event updates</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",marginTop:4}}>Share with viewers &amp; participants — participants also get judge feedback</div>
           </div>
           <div style={{background:"#110d22",border:"1px solid #ff980044",borderRadius:12,padding:20,gridColumn:"1 / -1"}}>
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff9800",letterSpacing:3,marginBottom:8}}>🎤 EMCEE CODE</div>
@@ -918,18 +918,18 @@ function AdminCreateEvent({ showToast, onCreated }) {
           <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:3,color:"#00c853",marginBottom:4}}>📤 SEND CODES TO ORGANIZER</div>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:14}}>Send all codes to the organizer via email or WhatsApp so they can log in and manage the event.</div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <a href={"mailto:?subject=Your DanBuzz Event: "+createdEvent.name+"&body=Hi,%0A%0AYour event has been set up on DanBuzz.%0A%0A--- YOUR CODES ---%0A%0AORGANIZER CODE (login to manage your event):%0A"+createdEvent.org_code+"%0A%0AATTENDEE %26 EMCEE CODE (share with emcee and audience):%0A"+createdEvent.viewer_code+"%0A%0AJUDGE CODES:%0A"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("%0A")+"%0A%0ALogin at: "+encodeURIComponent(window.location.origin)+"%0A%0A%E2%80%94 DanBuzz Team"}
+            <a href={"mailto:?subject=Your DanBuzz Event: "+createdEvent.name+"&body=Hi,%0A%0AYour event has been set up on DanBuzz.%0A%0A--- YOUR CODES ---%0A%0AORGANIZER CODE (login to manage your event):%0A"+createdEvent.org_code+"%0A%0AVIEWER %26 PARTICIPANT CODE (share with audience and participants — participants also see judge feedback):%0A"+createdEvent.viewer_code+"%0A%0AEMCEE CODE:%0A"+createdEvent.emcee_code+"%0A%0AJUDGE CODES:%0A"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("%0A")+"%0A%0ALogin at: "+encodeURIComponent(window.location.origin)+"%0A%0A%E2%80%94 DanBuzz Team"}
               className="btn" style={{background:"#00c853",color:"#000",fontSize:12,padding:"10px 20px",textDecoration:"none",display:"inline-block"}}>
               ✉️ SEND VIA EMAIL
             </a>
-            <a href={"https://wa.me/?text="+encodeURIComponent("*DanBuzz Event: "+createdEvent.name+"*\n\n*ORGANIZER CODE* (login to manage):\n"+createdEvent.org_code+"\n\n*ATTENDEE & EMCEE CODE:*\n"+createdEvent.viewer_code+"\n\n*JUDGE CODES:*\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin)}
+            <a href={"https://wa.me/?text="+encodeURIComponent("*DanBuzz Event: "+createdEvent.name+"*\n\n*ORGANIZER CODE* (login to manage):\n"+createdEvent.org_code+"\n\n*VIEWER & PARTICIPANT CODE* (share with audience & participants — participants also see judge feedback):\n"+createdEvent.viewer_code+"\n\n*EMCEE CODE:*\n"+createdEvent.emcee_code+"\n\n*JUDGE CODES:*\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin)}
               target="_blank" rel="noopener noreferrer"
               className="btn" style={{background:"#25D366",color:"#000",fontSize:12,padding:"10px 20px",textDecoration:"none",display:"inline-block"}}>
               💬 SEND VIA WHATSAPP
             </a>
             <button className="btn" style={{background:"#120e22",color:"#fff",border:"1px solid #3d2080",fontSize:12,padding:"10px 20px"}}
               onClick={()=>{
-                const text="DanBuzz Event: "+createdEvent.name+"\n\nORGANIZER CODE:\n"+createdEvent.org_code+"\n\nATTENDEE & EMCEE CODE:\n"+createdEvent.viewer_code+"\n\nJUDGE CODES:\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin;
+                const text="DanBuzz Event: "+createdEvent.name+"\n\nORGANIZER CODE:\n"+createdEvent.org_code+"\n\nVIEWER & PARTICIPANT CODE (share with audience & participants):\n"+createdEvent.viewer_code+"\n\nEMCEE CODE:\n"+createdEvent.emcee_code+"\n\nJUDGE CODES:\n"+(createdEvent.judgeCodes||[]).map(j=>j.category+" - Judge "+j.slot+": "+j.code).join("\n")+"\n\nLogin at: "+window.location.origin;
                 navigator.clipboard?.writeText(text).catch(()=>{});
                 setCopied("all");setTimeout(()=>setCopied(null),2000);
               }}>
@@ -1049,36 +1049,80 @@ function OrgLoginScreen({ onBack, onLogin, showToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// VIEWER LOGIN
+// VIEWER / PARTICIPANT LOGIN
+// Everyone enters: viewer code, name, city, phone
+// → Event is found by viewer_code
+// → If name+city+phone matches a registered participant in that event → show feedback tab too
+// → Otherwise → viewer only (no feedback tab)
 // ─────────────────────────────────────────────────────────────────
 function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
-  const [viewerCode,setViewerCode]=useState(""); const [name,setName]=useState(""); const [loading,setLoading]=useState(false);
+  const [viewerCode,setViewerCode]=useState("");
+  const [name,setName]=useState("");
+  const [city,setCity]=useState("");
+  const [phone,setPhone]=useState("");
+  const [loading,setLoading]=useState(false);
 
   const handleJoin=async()=>{
-    if(!viewerCode.trim())return showToast("Enter the event code!","error");
+    if(!viewerCode.trim())return showToast("Enter the viewer code!","error");
     if(!name.trim())return showToast("Enter your name!","error");
+    if(!city.trim())return showToast("Enter your city!","error");
+    if(!phone.trim())return showToast("Enter your phone!","error");
     setLoading(true);
-    const{data,error}=await supabase.from("events").select("*").eq("viewer_code",viewerCode.trim().toUpperCase()).single();
-    if(error||!data){showToast("Invalid event code!","error");setLoading(false);return;}
-    showToast(`Welcome, ${name.trim()}! Loading live view…`);
-    onLogin({event:data,name:name.trim(),role:"attendee"});setLoading(false);
+
+    // Step 1: Find event by viewer_code
+    const upper=viewerCode.trim().toUpperCase();
+    const{data:evData,error:evErr}=await supabase.from("events").select("*").eq("viewer_code",upper).single();
+    if(evErr||!evData){showToast("Invalid viewer code!","error");setLoading(false);return;}
+
+    // Step 2: Check if this person is a registered participant in this event
+    // Match by name + city + phone — same fields used during registration
+    const{data:partData}=await supabase.from("participants").select("*")
+      .eq("event_id",evData.id);
+
+    const matchedParticipant = (partData||[]).find(p=>
+      p.name.trim().toLowerCase()===name.trim().toLowerCase()&&
+      p.city.trim().toLowerCase()===city.trim().toLowerCase()&&
+      (p.phone||"").trim()===phone.trim()
+    );
+
+    if(matchedParticipant){
+      showToast(`Welcome, ${matchedParticipant.name}! Your feedback is available.`);
+      onLogin({event:evData,name:matchedParticipant.name,role:"participant",participant:matchedParticipant});
+    } else {
+      showToast(`Welcome, ${name.trim()}! Loading live view…`);
+      onLogin({event:evData,name:name.trim(),role:"attendee",participant:null});
+    }
+    setLoading(false);
   };
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"linear-gradient(160deg,#0a0612,#0d0a22,#0a0e1a)"}}>
-      <div style={{width:"100%",maxWidth:400}}>
+      <div style={{width:"100%",maxWidth:420}}>
         <button className="btn" style={{background:"transparent",color:"#7755aa",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 ATTENDEE LIVE VIEW</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:28}}>Enter the event code and your name to follow the event live.</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 ATTENDEE & PARTICIPANT LOGIN</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:20,padding:"10px 14px",background:"#0f0b1e",borderRadius:8,border:"1px solid #1a1540",lineHeight:1.6}}>
+          <div style={{marginBottom:4}}><span style={{color:"#00e5ff",fontWeight:700}}>Viewers:</span> Enter the viewer code + your name, city &amp; phone to watch live.</div>
+          <div><span style={{color:"#a855f7",fontWeight:700}}>Participants:</span> Enter the same viewer code + the name, city &amp; phone you registered with — you'll also see your judge feedback.</div>
+        </div>
         <div style={{marginBottom:14}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>EVENT CODE</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>VIEWER CODE <span style={{color:"#ff4d4d"}}>*</span></div>
           <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={viewerCode} onChange={e=>setViewerCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleJoin()} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
         </div>
-        <div style={{marginBottom:20}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME</div>
-          <input className="inp" placeholder="Your name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME <span style={{color:"#ff4d4d"}}>*</span></div>
+            <input className="inp" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
+          </div>
+          <div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>CITY <span style={{color:"#ff4d4d"}}>*</span></div>
+            <input className="inp" placeholder="Your city" value={city} onChange={e=>setCity(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
+          </div>
         </div>
-        <button className="btn" style={{background:"linear-gradient(135deg,#00e5ff,#3b82f6)",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={handleJoin} disabled={loading}>{loading?<Spinner/>:"WATCH LIVE →"}</button>
+        <div style={{marginBottom:20}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>PHONE <span style={{color:"#ff4d4d"}}>*</span></div>
+          <input className="inp" placeholder="Phone number" value={phone} onChange={e=>setPhone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
+        </div>
+        <button className="btn" style={{background:"linear-gradient(135deg,#00e5ff,#3b82f6)",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={handleJoin} disabled={loading}>{loading?<Spinner/>:"ENTER →"}</button>
       </div>
     </div>
   );
@@ -1262,7 +1306,31 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const getBattleDecisions = (mi) => battles.filter(b=>b.round===currentRound&&b.match_index===mi);
   const getMyDecision = (mi, tieRound) => battles.find(b=>b.round===currentRound&&b.match_index===mi&&b.judge_key===myKey&&(b.tie_round??0)===tieRound);
 
-  const submitPrelimScore=async(pid)=>{
+  const [feedbackInputs, setFeedbackInputs] = useState({});
+  const [feedbackSending, setFeedbackSending] = useState({});
+
+  const submitFeedback = async (participantId, participantName, round, feedbackText) => {
+    if (!feedbackText?.trim()) return;
+    const key = `${participantId}-${round}`;
+    setFeedbackSending(prev => ({...prev, [key]: true}));
+    const { error } = await supabase.from("judge_feedback").insert({
+      event_id: event.id,
+      participant_id: participantId,
+      participant_name: participantName,
+      category: myCategory,
+      round: round,
+      judge_name: judgeCode.judge_name,
+      judge_key: myKey,
+      judge_slot: judgeCode.slot,
+      feedback: feedbackText.trim(),
+    });
+    if (error) { showToast("Failed to send feedback: " + error.message, "error"); }
+    else {
+      showToast(`Feedback sent to ${participantName} ✓`);
+      setFeedbackInputs(prev => ({...prev, [key]: ""}));
+    }
+    setFeedbackSending(prev => ({...prev, [key]: false}));
+  };
     const val=parseFloat(scoreInputs[pid]);
     if(isNaN(val)||val<1||val>10)return showToast("Score must be 1–10","error");
     const existing=scores.find(s=>s.participant_id===pid&&s.judge_key===myKey&&s.event_id===event.id);
@@ -1430,16 +1498,29 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             {checkedIn.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No checked-in participants yet</div>}
             {checkedIn.map(p=>{
               const myScore=getMyScore(p.id);
+              const fbKey=`${p.id}-Prelims`;
               return (
-                <div key={p.id} className="card" style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",border:myScore!==undefined?`1px solid ${col.border}`:"1px solid #1e1e1e"}}>
-                  <div style={{flex:1,minWidth:110}}>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div>
+                <div key={p.id} className="card" style={{border:myScore!==undefined?`1px solid ${col.border}`:"1px solid #1e1e1e"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:10}}>
+                    <div style={{flex:1,minWidth:110}}>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div>
+                    </div>
+                    {myScore!==undefined&&<span className="badge" style={{background:col.bg,color:col.primary,border:`1px solid ${col.border}`}}>MY SCORE: {myScore}</span>}
+                    <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                      <input className="inp" type="number" min="1" max="10" step="0.5" placeholder="1–10" value={scoreInputs[p.id]||""} onChange={e=>setScoreInputs(prev=>({...prev,[p.id]:e.target.value}))} style={{width:72}}/>
+                      <button className="btn" style={{background:col.primary,color:"#000",fontSize:11}} onClick={()=>submitPrelimScore(p.id)}>{myScore!==undefined?"UPDATE":"SUBMIT"}</button>
+                    </div>
                   </div>
-                  {myScore!==undefined&&<span className="badge" style={{background:col.bg,color:col.primary,border:`1px solid ${col.border}`}}>MY SCORE: {myScore}</span>}
-                  <div style={{display:"flex",gap:7,alignItems:"center"}}>
-                    <input className="inp" type="number" min="1" max="10" step="0.5" placeholder="1–10" value={scoreInputs[p.id]||""} onChange={e=>setScoreInputs(prev=>({...prev,[p.id]:e.target.value}))} style={{width:72}}/>
-                    <button className="btn" style={{background:col.primary,color:"#000",fontSize:11}} onClick={()=>submitPrelimScore(p.id)}>{myScore!==undefined?"UPDATE":"SUBMIT"}</button>
+                  {/* Feedback section */}
+                  <div style={{borderTop:"1px solid #1a1a1a",paddingTop:8,display:"flex",gap:7,alignItems:"flex-end"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:4}}>FEEDBACK (PRIVATE · ONLY THIS DANCER SEES)</div>
+                      <textarea className="inp" placeholder="Optional note or tip for this dancer…" value={feedbackInputs[fbKey]||""} onChange={e=>setFeedbackInputs(prev=>({...prev,[fbKey]:e.target.value}))} style={{width:"100%",resize:"vertical",minHeight:52,fontFamily:"Barlow,sans-serif",fontSize:12,lineHeight:1.5}}/>
+                    </div>
+                    <button className="btn" style={{background:"#a855f7",color:"#fff",fontSize:10,padding:"8px 14px",whiteSpace:"nowrap",flexShrink:0}} disabled={!feedbackInputs[fbKey]?.trim()||feedbackSending[fbKey]} onClick={()=>submitFeedback(p.id,p.name,"Prelims",feedbackInputs[fbKey])}>
+                      {feedbackSending[fbKey]?<Spinner/>:"SEND 💬"}
+                    </button>
                   </div>
                 </div>
               );
@@ -1528,6 +1609,25 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                           </div>
                         );
                       })}
+                      <div style={{padding:"12px 18px",background:"#080614",borderTop:"1px solid #130e24"}}>
+                        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>SEND FEEDBACK TO FIGHTERS (PRIVATE)</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                          {fighters.map(p=>{
+                            const fbKey=`${p.id}-${currentRound}`;
+                            return (
+                              <div key={p.id} style={{display:"flex",gap:7,alignItems:"flex-end"}}>
+                                <div style={{flex:1}}>
+                                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginBottom:3}}>{p.name}</div>
+                                  <textarea className="inp" placeholder={`Feedback for ${p.name}…`} value={feedbackInputs[fbKey]||""} onChange={e=>setFeedbackInputs(prev=>({...prev,[fbKey]:e.target.value}))} style={{width:"100%",resize:"none",height:44,fontFamily:"Barlow,sans-serif",fontSize:11,lineHeight:1.4,padding:"6px 10px"}}/>
+                                </div>
+                                <button className="btn" style={{background:"#a855f7",color:"#fff",fontSize:10,padding:"6px 12px",whiteSpace:"nowrap",flexShrink:0}} disabled={!feedbackInputs[fbKey]?.trim()||feedbackSending[fbKey]} onClick={()=>submitFeedback(p.id,p.name,currentRound,feedbackInputs[fbKey])}>
+                                  {feedbackSending[fbKey]?<Spinner/>:"💬"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   ):(
                     <div>
@@ -1593,6 +1693,25 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                           {myDec?"UPDATE →":"SUBMIT CARD →"}
                         </button>
                         {tieChosen&&(!is3way||isRunoff)&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>Both battle again · same 2 dancers</span>}
+                      </div>
+                      <div style={{padding:"12px 18px",background:"#080614",borderTop:"1px solid #130e24"}}>
+                        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>SEND FEEDBACK TO FIGHTERS (PRIVATE)</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                          {fighters.map(p=>{
+                            const fbKey=`${p.id}-${currentRound}`;
+                            return (
+                              <div key={p.id} style={{display:"flex",gap:7,alignItems:"flex-end"}}>
+                                <div style={{flex:1}}>
+                                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginBottom:3}}>{p.name}</div>
+                                  <textarea className="inp" placeholder={`Feedback for ${p.name}…`} value={feedbackInputs[fbKey]||""} onChange={e=>setFeedbackInputs(prev=>({...prev,[fbKey]:e.target.value}))} style={{width:"100%",resize:"none",height:44,fontFamily:"Barlow,sans-serif",fontSize:11,lineHeight:1.4,padding:"6px 10px"}}/>
+                                </div>
+                                <button className="btn" style={{background:"#a855f7",color:"#fff",fontSize:10,padding:"6px 12px",whiteSpace:"nowrap",flexShrink:0}} disabled={!feedbackInputs[fbKey]?.trim()||feedbackSending[fbKey]} onClick={()=>submitFeedback(p.id,p.name,currentRound,feedbackInputs[fbKey])}>
+                                  {feedbackSending[fbKey]?<Spinner/>:"💬"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -2038,13 +2157,106 @@ function WinnerDashboard({ event, categories, participants, battles, allRounds }
 }
 
 // ─────────────────────────────────────────────────────────────────
+// PARTICIPANT FEEDBACK VIEW
+// Shows all judge feedbacks for a specific participant across all rounds
+// Only visible when the user logged in with matching name+city+phone
+// ─────────────────────────────────────────────────────────────────
+function ParticipantFeedbackView({ event, participant, allRounds, col }) {
+  const [feedbacks, setFeedbacks] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const rounds = allRounds || ["Prelims"];
+
+  useEffect(()=>{
+    const load = async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from("judge_feedback")
+        .select("*")
+        .eq("event_id", event.id)
+        .eq("participant_id", participant.id)
+        .order("created_at", { ascending: false });
+      setFeedbacks(data || []);
+      setLoading(false);
+    };
+    load();
+    const ch = supabase.channel(`fb-${event.id}-${participant.id}`)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public",
+        table: "judge_feedback",
+        filter: `event_id=eq.${event.id}`
+      }, (p) => {
+        if (p.new.participant_id === participant.id) setFeedbacks(prev => [p.new, ...prev]);
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [event.id, participant.id]);
+
+  const grouped = useMemo(() => {
+    const map = {};
+    feedbacks.forEach(fb => {
+      const r = fb.round || "General";
+      if (!map[r]) map[r] = [];
+      map[r].push(fb);
+    });
+    return map;
+  }, [feedbacks]);
+
+  const roundOrder = [...rounds, "General"].filter(r => grouped[r]?.length);
+
+  if (loading) return <div style={{padding:"48px",textAlign:"center"}}><Spinner/></div>;
+
+  return (
+    <div className="slide">
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4,flexWrap:"wrap"}}>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:"#a855f7"}}>💬 MY JUDGE FEEDBACK</div>
+        <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",background:"#a855f722",border:"1px solid #a855f744",borderRadius:10,padding:"2px 10px"}}>{participant.name} · {participant.category}</span>
+      </div>
+      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:20}}>Private feedback from judges — visible only to you.</div>
+      {feedbacks.length === 0 ? (
+        <div style={{background:"#0f0b1e",border:"1px solid #1a1a1a",borderRadius:12,padding:"48px",textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:12}}>💭</div>
+          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,color:"#3d2080",marginBottom:6}}>NO FEEDBACK YET</div>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>Judges haven't submitted feedback for you yet. Check back later.</div>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {roundOrder.map(round => (
+            <div key={round}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:round==="Prelims"?"#ffd700":round==="General"?"#7755aa":col.primary}}>{round}</div>
+                <div style={{flex:1,height:1,background:"#1a1a1a"}}/>
+                <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>{grouped[round].length} note{grouped[round].length!==1?"s":""}</span>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {grouped[round].map((fb,i) => (
+                  <div key={fb.id||i} style={{background:"#0f0b1e",border:"1px solid #1e1840",borderRadius:12,padding:"16px 18px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:2,color:"#a855f7"}}>{fb.judge_name||"Judge"}</span>
+                      {fb.judge_slot&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",background:"#1c1232",border:"1px solid #3d2080",borderRadius:6,padding:"2px 7px"}}>Judge {fb.judge_slot}</span>}
+                      <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#3d2080",marginLeft:"auto"}}>{fb.created_at?new Date(fb.created_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
+                    </div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:14,color:"#e0d8f0",lineHeight:1.6}}>{fb.feedback}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // ATTENDEE DASHBOARD
 // ─────────────────────────────────────────────────────────────────
-function AttendeeDashboard({ event, attendeeName, onBack }) {
+function AttendeeDashboard({ event, attendeeName, participant, onBack }) {
+  const isParticipant = !!participant; // true = registered dancer, show feedback tab
   const categories = event.categories||[];
   const allRounds  = event.rounds||["Prelims","Finals"];
   const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "attendee");
   const [showNotifHistory, setShowNotifHistory] = useState(false);
+  const [mainTab, setMainTab] = useState("live"); // "live" | "feedback"
   // Attendees see knockout rounds in selector; prelims shown as leaderboard when no knockout active
   const rounds     = allRounds.filter(r=>r!=="Prelims");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
@@ -2107,7 +2319,8 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
             <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:4,marginTop:2}}>{event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}</div>
             <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
               <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#00c853"}}/>
-              <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",letterSpacing:2}}>LIVE · Attendee: {attendeeName}</span>
+              <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",letterSpacing:2}}>LIVE · {isParticipant?"Participant":"Attendee"}: {attendeeName}</span>
+              {isParticipant&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#a855f7",background:"#a855f722",border:"1px solid #a855f744",borderRadius:10,padding:"2px 8px",letterSpacing:1}}>🏅 PARTICIPANT</span>}
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2127,12 +2340,26 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
             <NotificationHistoryPanel history={notifHistory} isHost={false}/>
           </div>
         )}
+        {/* Tab bar — only shown if participant (has feedback to show) */}
+        {isParticipant&&(
+          <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",marginBottom:12,gap:0}}>
+            {[{key:"live",label:"📺 LIVE VIEW"},{key:"feedback",label:"💬 MY FEEDBACK"}].map(t=>(
+              <button key={t.key} className="tbtn" style={{color:mainTab===t.key?"#a855f7":"#7755aa",borderBottom:mainTab===t.key?"3px solid #a855f7":"3px solid transparent",paddingBottom:10}} onClick={()=>setMainTab(t.key)}>{t.label}</button>
+            ))}
+          </div>
+        )}
+        {mainTab==="live"&&(
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:0}}>
           {categories.map(cat=>{const c=getCatColor(categories,cat);const cnt=participants.filter(p=>p.category===cat&&p.checked_in).length;const active=activeCat===cat;return <button key={cat} className="btn" style={{fontSize:11,padding:"7px 14px",background:active?c.primary:"#120e22",color:active?"#000":"#7755aa",border:`1px solid ${active?c.primary:"#2a1840"}`}} onClick={()=>setActiveCat(cat)}>{cat} <span style={{opacity:.7}}>({cnt})</span></button>;})}
         </div>
+        )}
       </div>
 
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
+        {mainTab==="feedback"&&isParticipant?(
+          <ParticipantFeedbackView event={event} participant={participant} allRounds={allRounds} col={col}/>
+        ):(
+        <>
         {/* Check if finals are decided across any category — show winner dashboard */}
         {(()=>{
           const knockoutRounds=(allRounds||[]).filter(r=>r!=="Prelims");
@@ -2223,15 +2450,13 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
             </>
           );
         })()}
+        </>
+        )}
       </div>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────
-// EMCEE LOGIN
-// Uses the same viewer_code as attendees, but with role "emcee"
-// ─────────────────────────────────────────────────────────────────
 function EmceeLoginScreen({ onBack, onLogin, showToast }) {
   const [code,setCode]=useState(""); const [name,setName]=useState(""); const [loading,setLoading]=useState(false);
   const handleLogin=async()=>{
@@ -3948,9 +4173,9 @@ function AppInner() {
       {screen==="adminDashboard"  &&<AdminDashboard onBack={handleAdminLogout} showToast={showToast}/>}
       {screen==="orgLogin"        &&<OrgLoginScreen onBack={()=>setScreen("landing")} onLogin={(ev, memberName)=>{setActiveEvent(ev);setOrgMemberName(memberName);setScreen("dashboard");}} showToast={showToast}/>}
       {screen==="judgeLogin"      &&<JudgeLoginScreen onBack={()=>setScreen("landing")} onLogin={({judgeCode,event})=>{setJudgeData(judgeCode);setActiveEvent(event);setScreen("judgeDashboard");}} showToast={showToast}/>}
-      {screen==="attendeeLogin"     &&<AttendeeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name,role})=>{setActiveEvent(event);setViewerData({name,role});setScreen("attendeeDashboard");}} showToast={showToast}/>}
+      {screen==="attendeeLogin"     &&<AttendeeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name,role,participant})=>{setActiveEvent(event);setViewerData({name,role,participant});setScreen("attendeeDashboard");}} showToast={showToast}/>}
       {screen==="judgeDashboard"  &&judgeData&&activeEvent&&<JudgeDashboard judgeCode={judgeData} event={activeEvent} onBack={()=>{setJudgeData(null);setActiveEvent(null);setScreen("landing");}} showToast={showToast}/>}
-      {screen==="attendeeDashboard"&&viewerData&&activeEvent&&<AttendeeDashboard event={activeEvent} attendeeName={viewerData.name} onBack={()=>{setViewerData(null);setActiveEvent(null);setScreen("landing");}}/>}
+      {screen==="attendeeDashboard"&&viewerData&&activeEvent&&<AttendeeDashboard event={activeEvent} attendeeName={viewerData.name} participant={viewerData.participant||null} onBack={()=>{setViewerData(null);setActiveEvent(null);setScreen("landing");}}/>}
       {screen==="emceeLogin"      &&<EmceeLoginScreen onBack={()=>setScreen("landing")} onLogin={({event,name})=>{setActiveEvent(event);setEmceeData({name});setScreen("emceeDashboard");}} showToast={showToast}/>}
       {screen==="emceeDashboard"  &&emceeData&&activeEvent&&<EmceeDashboard event={activeEvent} emceeName={emceeData.name} onBack={()=>{setEmceeData(null);setActiveEvent(null);setScreen("landing");}}/>}
       {screen==="dashboard"       &&activeEvent&&<Dashboard event={activeEvent} memberName={orgMemberName} onBack={()=>{setActiveEvent(null);setOrgMemberName(null);setScreen("landing");}} showToast={showToast}/>}
