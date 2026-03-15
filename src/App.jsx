@@ -2499,78 +2499,88 @@ function EmceeDashboard({ event, emceeName, onBack }) {
 // ROUND SETUP TAB — organizer configures knockout rounds after prelims
 // ─────────────────────────────────────────────────────────────────
 function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categories }) {
+  // `flow` is an ORDERED list — user adds rounds one by one in the sequence they want
   const currentKnockout = (eventRounds||[]).filter(r => r !== "Prelims");
-  const [selected, setSelected] = useState(currentKnockout);
+  const [flow, setFlow] = useState(currentKnockout);
   const [hasChanges, setHasChanges] = useState(false);
-  const [customInput, setCustomInput] = useState("");
-  const [customError, setCustomError] = useState("");
+  const [manualInput, setManualInput] = useState("");
+  const [manualError, setManualError] = useState("");
 
-  // Standard rounds (fixed presets)
-  // Manual/extra rounds = any round not in the standard list
-  const MANUAL_PRESETS = ["Top 6", "Top 10", "Top 12", "Top 20", "Top 24"];
+  const totalCheckedIn = participants.filter(p=>p.checked_in).length;
+  const totalParticipants = participants.length;
 
-  const toggle = (r) => {
-    const next = selected.includes(r) ? selected.filter(x=>x!==r) : [...selected, r];
-    setSelected(next);
+  // Add a round to the END of the flow (if not already in it)
+  const addRound = (r) => {
+    if (flow.includes(r)) {
+      // Already in flow — remove it instead (toggle off)
+      setFlow(prev => prev.filter(x => x !== r));
+    } else {
+      setFlow(prev => [...prev, r]);
+    }
     setHasChanges(true);
-    setCustomError("");
+    setManualError("");
   };
 
-  const addCustomRound = (rawVal) => {
-    const val = (rawVal || customInput).trim();
+  // Remove a round from flow
+  const removeRound = (r) => {
+    setFlow(prev => prev.filter(x => x !== r));
+    setHasChanges(true);
+  };
+
+  // Move a round up or down in the order
+  const moveRound = (idx, dir) => {
+    const newFlow = [...flow];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= newFlow.length) return;
+    [newFlow[idx], newFlow[swap]] = [newFlow[swap], newFlow[idx]];
+    setFlow(newFlow);
+    setHasChanges(true);
+  };
+
+  // Add a custom round from the manual input
+  const addManual = () => {
+    const val = manualInput.trim();
     if (!val) return;
     let roundName = val;
     const numOnly = val.match(/^(\d+)$/);
     if (numOnly) roundName = `Top ${numOnly[1]}`;
     else if (!val.match(/top\s*\d+/i)) {
-      setCustomError("Use format: Top 6, Top 12, or just a number like 12");
+      setManualError("Type a number like 17, or Top 17");
       return;
     }
     roundName = roundName.replace(/top\s*(\d+)/i, (_, n) => `Top ${n}`);
-    if (selected.includes(roundName)) {
-      setCustomError(`${roundName} already added`);
+    if (flow.includes(roundName)) {
+      setManualError(`${roundName} is already in the flow`);
       return;
     }
-    setCustomError("");
-    setSelected(prev => [...prev, roundName]);
-    setCustomInput("");
+    setManualError("");
+    setFlow(prev => [...prev, roundName]);
+    setManualInput("");
     setHasChanges(true);
   };
 
-  // Order: standard list order first, then custom sorted by size descending
-  const customSelected = selected.filter(r => !ALL_POST_PRELIM_ROUNDS.includes(r));
-  const orderedSelected = [
-    ...ALL_POST_PRELIM_ROUNDS.filter(r => selected.includes(r)),
-    ...customSelected.sort((a, b) => getRoundSize(b) - getRoundSize(a)),
-  ];
-  const fullFlow = ["Prelims", ...orderedSelected];
-
-  const totalCheckedIn = participants.filter(p=>p.checked_in).length;
-  const totalParticipants = participants.length;
+  const fullFlow = ["Prelims", ...flow];
 
   const handleSave = () => {
-    if (orderedSelected.length === 0) return;
-    onSave(["Prelims", ...orderedSelected]);
+    if (flow.length === 0) return;
+    onSave(["Prelims", ...flow]);
     setHasChanges(false);
   };
 
-  const RoundCard = ({ r, isOn, onToggle, isCustom = false }) => {
+  const RoundBtn = ({ r }) => {
+    const inFlow = flow.includes(r);
     const size = getRoundSize(r);
-    const enoughDancers = totalCheckedIn === 0 || totalCheckedIn >= size * 0.5;
     return (
-      <button onClick={onToggle}
+      <button onClick={() => addRound(r)}
         style={{
           fontFamily:"Bebas Neue,sans-serif", fontSize:15, letterSpacing:2,
-          padding:"12px 20px", borderRadius:10, cursor:"pointer", transition:"all .15s",
-          background: isOn ? col.bg : "#160e2a",
-          border: `2px solid ${isOn ? col.primary : isCustom ? "#5544aa" : "#3d2080"}`,
-          color: isOn ? col.primary : isCustom ? "#9980cc" : "#55449a",
-          opacity: (!enoughDancers && !isOn) ? 0.4 : 1,
-          position:"relative",
+          padding:"12px 22px", borderRadius:10, cursor:"pointer", transition:"all .15s",
+          background: inFlow ? col.bg : "#160e2a",
+          border: `2px solid ${inFlow ? col.primary : "#3d2080"}`,
+          color: inFlow ? col.primary : "#55449a",
         }}>
-        {isCustom && !isOn && <span style={{position:"absolute",top:4,right:6,fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",letterSpacing:1}}>CUSTOM</span>}
-        {isOn ? "✓ " : ""}{r}
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:isOn?col.primary+"aa":"#3d2080",letterSpacing:0,marginTop:3}}>
+        {inFlow ? "✓ " : "+ "}{r}
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:inFlow?col.primary+"88":"#3d2080",marginTop:3}}>
           {r==="Finals" ? "2 dancers" : `${size} dancers`}
         </div>
       </button>
@@ -2581,7 +2591,7 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
     <div className="slide">
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>⚡ ROUND SETUP</div>
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#9980cc",marginBottom:20}}>
-        Select standard rounds or add custom ones. All selected rounds will appear in order in the bracket.
+        Tap rounds to add them in order. Use ↑ ↓ to reorder. You can build any flow like <em style={{color:"#fff"}}>Top 17 → Top 8 → Top 6 → Top 4 → Finals</em>.
       </div>
 
       {/* Stats */}
@@ -2603,71 +2613,75 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
         </div>
       </div>
 
-      {/* ── STANDARD ROUNDS ── */}
+      {/* ── STEP 1: Pick rounds ── */}
       <div style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"18px 20px",marginBottom:14}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>STANDARD ROUNDS</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
-          {ALL_POST_PRELIM_ROUNDS.map(r => (
-            <RoundCard key={r} r={r} isOn={selected.includes(r)} onToggle={()=>toggle(r)}/>
-          ))}
-        </div>
-      </div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:4}}>STEP 1 — TAP TO ADD ROUNDS (in the order you want)</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",marginBottom:12}}>Tap a round to add it to your flow. Tap again to remove it.</div>
 
-      {/* ── MANUAL / CUSTOM ROUNDS ── */}
-      <div style={{background:"#120e22",border:"1px solid #3d2080",borderRadius:12,padding:"18px 20px",marginBottom:14}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc",letterSpacing:2,marginBottom:4}}>MANUAL ROUNDS</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",marginBottom:12}}>Tap a preset or type any number below to add a custom round size.</div>
-
-        {/* Preset manual cards */}
-        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:14}}>
-          {MANUAL_PRESETS.map(r => (
-            <RoundCard key={r} r={r} isOn={selected.includes(r)} onToggle={()=>toggle(r)} isCustom={true}/>
-          ))}
+        {/* Standard rounds */}
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>STANDARD</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:16}}>
+          {ALL_POST_PRELIM_ROUNDS.map(r => <RoundBtn key={r} r={r}/>)}
         </div>
 
-        {/* Typed custom input */}
+        {/* Manual input — single box only */}
         <div style={{borderTop:"1px solid #1a1030",paddingTop:14}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>OR TYPE A CUSTOM NUMBER</div>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <input className="inp" placeholder="e.g. 14  or  Top 14"
-              value={customInput}
-              onChange={e=>{setCustomInput(e.target.value);setCustomError("");}}
-              onKeyDown={e=>e.key==="Enter"&&addCustomRound()}
-              style={{flex:1,minWidth:160,fontFamily:"Bebas Neue,sans-serif",fontSize:15,letterSpacing:1}}/>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>CUSTOM ROUND (type any number)</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <input className="inp" placeholder="e.g. 17  or  Top 6"
+              value={manualInput}
+              onChange={e=>{setManualInput(e.target.value);setManualError("");}}
+              onKeyDown={e=>e.key==="Enter"&&addManual()}
+              style={{flex:1,fontFamily:"Bebas Neue,sans-serif",fontSize:15,letterSpacing:1}}/>
             <button className="btn" style={{background:col.primary,color:"#000",fontSize:12,padding:"9px 20px",whiteSpace:"nowrap"}}
-              onClick={()=>addCustomRound()}>
+              onClick={addManual}>
               + ADD
             </button>
           </div>
-          {customError&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d",marginTop:6}}>⚠ {customError}</div>}
+          {manualError&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d",marginTop:6}}>⚠ {manualError}</div>}
         </div>
+      </div>
 
-        {/* Show added custom rounds (non-preset, non-standard) as removable cards */}
-        {customSelected.filter(r=>!MANUAL_PRESETS.includes(r)).length>0&&(
-          <div style={{marginTop:14}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>ADDED CUSTOM ROUNDS</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {customSelected.filter(r=>!MANUAL_PRESETS.includes(r)).map(r=>(
-                <div key={r} style={{display:"flex",alignItems:"center",gap:6,background:col.bg,border:`1px solid ${col.border}`,borderRadius:10,padding:"10px 14px"}}>
-                  <div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,color:col.primary,letterSpacing:2}}>✓ {r}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginTop:2}}>{getRoundSize(r)} dancers</div>
-                  </div>
-                  <button onClick={()=>{setSelected(prev=>prev.filter(x=>x!==r));setHasChanges(true);}}
-                    style={{background:"none",border:"1px solid #ff4d4d44",borderRadius:6,color:"#ff4d4d",cursor:"pointer",fontSize:12,padding:"2px 7px",marginLeft:4}}>✕</button>
+      {/* ── STEP 2: Current flow with reorder ── */}
+      <div style={{background:"#120e22",border:`1px solid ${flow.length>0?col.border:"#2a1f4a"}`,borderRadius:12,padding:"18px 20px",marginBottom:14}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:4}}>STEP 2 — YOUR ROUND FLOW (reorder with ↑ ↓)</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",marginBottom:12}}>Use the arrows to change order. Tap ✕ to remove a round.</div>
+
+        {flow.length===0?(
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#3d2080",textAlign:"center",padding:"20px 0"}}>No rounds added yet — tap rounds above to build your flow</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {flow.map((r, i) => (
+              <div key={r} style={{display:"flex",alignItems:"center",gap:10,background:col.bg,border:`1px solid ${col.border}`,borderRadius:10,padding:"10px 14px"}}>
+                {/* Position number */}
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,color:col.primary,minWidth:28,textAlign:"center"}}>{i+1}</div>
+                {/* Round name */}
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:col.primary,letterSpacing:2}}>{r}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{r==="Finals"?"2 dancers":`${getRoundSize(r)} dancers`}</div>
                 </div>
-              ))}
-            </div>
+                {/* Move up/down */}
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  <button onClick={()=>moveRound(i,-1)} disabled={i===0}
+                    style={{background:"#1c1232",border:"1px solid #3d2080",borderRadius:5,color:i===0?"#2a1840":"#c084fc",cursor:i===0?"not-allowed":"pointer",padding:"2px 8px",fontSize:12,lineHeight:1}}>↑</button>
+                  <button onClick={()=>moveRound(i,1)} disabled={i===flow.length-1}
+                    style={{background:"#1c1232",border:"1px solid #3d2080",borderRadius:5,color:i===flow.length-1?"#2a1840":"#c084fc",cursor:i===flow.length-1?"not-allowed":"pointer",padding:"2px 8px",fontSize:12,lineHeight:1}}>↓</button>
+                </div>
+                {/* Remove */}
+                <button onClick={()=>removeRound(r)}
+                  style={{background:"#150608",border:"1px solid #ff4d4d44",borderRadius:6,color:"#ff4d4d",cursor:"pointer",fontSize:13,padding:"4px 9px",lineHeight:1}}>✕</button>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Flow preview */}
+      {/* ── Flow preview ── */}
       <div style={{background:"#0b0818",border:"1px solid #2a1f4a",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>FLOW PREVIEW</div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           {fullFlow.map((r,i) => (
-            <span key={r} style={{display:"flex",alignItems:"center",gap:8}}>
+            <span key={`${r}-${i}`} style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{
                 fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,
                 padding:"5px 14px",borderRadius:6,
@@ -2678,27 +2692,7 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
               {i < fullFlow.length-1 && <span style={{color:"#3d2080",fontSize:14}}>→</span>}
             </span>
           ))}
-          {orderedSelected.length===0&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d"}}>⚠ Select at least one round</span>}
-        </div>
-      </div>
-
-      {/* Quick presets */}
-      <div style={{marginBottom:20}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>QUICK PRESETS</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {[
-            {label:"Top 4 → Finals",rounds:["Top 4","Finals"]},
-            {label:"Top 8 → Top 4 → Finals",rounds:["Top 8","Top 4","Finals"]},
-            {label:"Top 16 → Top 8 → Top 4 → Finals",rounds:["Top 16","Top 8","Top 4","Finals"]},
-            {label:"Top 32 → Top 16 → Top 8 → Top 4 → Finals",rounds:["Top 32","Top 16","Top 8","Top 4","Finals"]},
-            {label:"Finals Only",rounds:["Finals"]},
-          ].map(p=>(
-            <button key={p.label} onClick={()=>{setSelected(p.rounds);setHasChanges(true);}}
-              style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"7px 16px",borderRadius:6,
-                background:"#160e2a",border:"1px solid #3d2080",color:"#9980cc",cursor:"pointer",transition:"all .15s"}}>
-              {p.label}
-            </button>
-          ))}
+          {flow.length===0&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d"}}>⚠ Add at least one round above</span>}
         </div>
       </div>
 
@@ -2708,13 +2702,13 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
       </div>
 
       <button className="btn"
-        style={{background:orderedSelected.length>0?col.primary:"#1c1232",color:orderedSelected.length>0?"#000":"#55449a",fontSize:14,padding:"13px 32px",opacity:hasChanges?1:0.5}}
+        style={{background:flow.length>0?col.primary:"#1c1232",color:flow.length>0?"#000":"#55449a",fontSize:14,padding:"13px 32px",opacity:hasChanges?1:0.5}}
         onClick={handleSave}
-        disabled={saving||orderedSelected.length===0||!hasChanges}>
+        disabled={saving||flow.length===0||!hasChanges}>
         {saving?<Spinner/>:hasChanges?"💾 SAVE ROUND FLOW →":"✓ SAVED"}
       </button>
 
-      {!hasChanges&&orderedSelected.length>0&&(
+      {!hasChanges&&flow.length>0&&(
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginTop:10}}>
           Round flow is saved. Judges and attendees will see these rounds live.
         </div>
