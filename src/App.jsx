@@ -1837,10 +1837,9 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 // ─────────────────────────────────────────────────────────────────
 // ORGANIZER: Add Participant tab
 // ─────────────────────────────────────────────────────────────────
-function OrganizerTab({ activeCat, catSorted, col, onAdd, onRemove, getScore }) {
+function OrganizerTab({ activeCat, catSorted, col, onAdd, getScore }) {
   const [form,setForm]=useState({name:"",city:"",phone:"",payment_method:"cash"});
   const [loading,setLoading]=useState(false);
-  const [confirmDelete,setConfirmDelete]=useState(null); // participant id pending confirm
   const submit=async()=>{setLoading(true);await onAdd({...form,category:activeCat});setForm({name:"",city:"",phone:"",payment_method:"cash"});setLoading(false);};
   return (
     <div className="slide">
@@ -1877,28 +1876,9 @@ function OrganizerTab({ activeCat, catSorted, col, onAdd, onRemove, getScore }) 
           <span className="badge" style={{background:p.payment_method==="online"?"#00e5ff22":"#ffd70022",color:p.payment_method==="online"?"#00e5ff":"#ffd700",border:`1px solid ${p.payment_method==="online"?"#00e5ff44":"#ffd70044"}`,marginRight:4}}>{p.payment_method==="online"?"📲 ONLINE":"💵 CASH"}</span>
           <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d"}}>{p.checked_in?"✓ IN":"PENDING"}</span>
           <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:col.primary,minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-          <button onClick={()=>setConfirmDelete(p.id)} title="Remove participant" style={{background:"none",border:"none",color:"#ff4d4d55",cursor:"pointer",fontSize:16,padding:"0 4px",marginLeft:4,lineHeight:1}} onMouseOver={e=>e.target.style.color="#ff4d4d"} onMouseOut={e=>e.target.style.color="#ff4d4d55"}>✕</button>
         </div>
       ))}
       {catSorted.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080",fontSize:13}}>No {activeCat} participants yet — add one above ↑</div>}
-
-      {/* Confirm delete modal */}
-      {confirmDelete&&(()=>{
-        const p=catSorted.find(x=>x.id===confirmDelete);
-        return (
-          <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-            <div style={{background:"#120e22",border:"1px solid #ff4d4d44",borderRadius:14,padding:28,maxWidth:360,width:"100%",textAlign:"center"}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:"#ff4d4d",marginBottom:8}}>REMOVE PARTICIPANT?</div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:13,color:"#8866bb",marginBottom:6}}><strong style={{color:"#fff"}}>{p?.name}</strong></div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:24}}>This will permanently delete them and all their scores.</div>
-              <div style={{display:"flex",gap:10}}>
-                <button className="btn" style={{flex:1,background:"#1c1232",color:"#777",border:"1px solid #3d2080"}} onClick={()=>setConfirmDelete(null)}>CANCEL</button>
-                <button className="btn" style={{flex:1,background:"#ff4d4d",color:"#000"}} onClick={()=>{onRemove(confirmDelete);setConfirmDelete(null);}}>YES, REMOVE</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
@@ -2590,6 +2570,7 @@ function EmceeDashboard({ event, emceeName, onBack }) {
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
 
   const TABS = [
+    {key:"participants",label:"👥 PARTICIPANTS"},
     {key:"prelims",label:"PRELIM SCORES"},
     {key:"leaderboard",label:"LEADERBOARD"},
     {key:"bracket",label:"BRACKET"},
@@ -2638,6 +2619,33 @@ function EmceeDashboard({ event, emceeName, onBack }) {
 
         {/* ── WINNER DASHBOARD ── */}
         {finalsDecided&&<WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={eventRounds}/>}
+
+        {/* ── PARTICIPANTS TAB ── */}
+        {tab==="participants"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>REGISTERED PARTICIPANTS · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>All registered dancers for this category.</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",letterSpacing:2,marginBottom:10}}>
+              {participants.filter(p=>p.category===activeCat).length} REGISTERED · {participants.filter(p=>p.category===activeCat&&p.checked_in).length} CHECKED IN
+            </div>
+            <div style={{background:"#0d0a1a",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
+              {participants.filter(p=>p.category===activeCat).length===0&&(
+                <div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No participants registered yet</div>
+              )}
+              {participants.filter(p=>p.category===activeCat).map((p,i)=>(
+                <div key={p.id} className="lrow" style={{borderBottom:"1px solid #111"}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,color:i<3?col.primary:"#2a1840",minWidth:36}}>#{i+1}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}{p.phone?` · ${p.phone}`:""}</div>
+                  </div>
+                  <span className="badge" style={{background:p.payment_method==="online"?"#00e5ff22":"#ffd70022",color:p.payment_method==="online"?"#00e5ff":"#ffd700",border:`1px solid ${p.payment_method==="online"?"#00e5ff44":"#ffd70044"}`,marginRight:4,fontSize:9}}>{p.payment_method==="online"?"📲 ONLINE":"💵 CASH"}</span>
+                  <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d",fontSize:9}}>{p.checked_in?"✓ IN":"PENDING"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── PRELIM SCORES TAB ── */}
         {tab==="prelims"&&(
@@ -3719,7 +3727,6 @@ function Dashboard({ event, memberName, onBack, showToast }) {
     showToast(`${form.name} added to ${activeCat}!`);
   },[activeCat,event.id,showToast]);
   const checkIn=useCallback(async(id)=>{const{error}=await supabase.from("participants").update({checked_in:true}).eq("id",id);if(error)return showToast("Check-in failed!","error");showToast("Dancer checked in ✓");},[showToast]);
-  const deleteParticipant=useCallback(async(id)=>{const{error}=await supabase.from("participants").delete().eq("id",id);if(error)return showToast("Remove failed: "+error.message,"error");showToast("Participant removed ✓");},[showToast]);
   const endEvent=async()=>{const{error}=await supabase.from("events").delete().eq("id",event.id);if(error)return showToast("Failed!","error");onBack();};
   const saveRounds=async(newRounds)=>{
     setRoundsSaving(true);
@@ -3937,7 +3944,7 @@ function Dashboard({ event, memberName, onBack, showToast }) {
           </div>
         </div>
 
-        {tab==="organizer"&&<OrganizerTab activeCat={activeCat} catSorted={catSorted} col={col} onAdd={addParticipant} onRemove={deleteParticipant} getScore={getScore}/>}
+        {tab==="organizer"&&<OrganizerTab activeCat={activeCat} catSorted={catSorted} col={col} onAdd={addParticipant} getScore={getScore}/>}
         {tab==="attendees"&&<AttendeeTab event={event} col={col} showToast={showToast}/>}
         {tab==="host"&&(
           <>
