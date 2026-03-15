@@ -260,6 +260,9 @@ const getBattleBorderColor = (result, colBorder) => {
   if (result.status === "tied")    return "#ffd70044";
   return "#2a1f4a";
 };
+
+// Get the ordered list of rounds from the event (excluding Prelims)
+const getKnockoutRounds = (eventRounds) =>
   (eventRounds || []).filter(r => r !== "Prelims");
 
 // Given prelim-ranked list, build the battles for the FIRST knockout round.
@@ -427,8 +430,10 @@ function isDisabledFor(notif, role) {
   if (!role) return false;
   const df = notif.disabled_for;
   if (!df) return false;
-  const arr = Array.isArray(df) ? df : (typeof df === "string" ? JSON.parse(df) : []);
-  return arr.includes(role);
+  try {
+    const arr = Array.isArray(df) ? df : (typeof df === "string" ? JSON.parse(df) : []);
+    return arr.includes(role);
+  } catch { return false; }
 }
 
 function useLiveNotifications(eventId, recipientRole) {
@@ -560,9 +565,12 @@ function NotificationHistoryPanel({ history, isHost, showToast }) {
   }, []);
 
   const toggleDisableFor = async (notif, role) => {
-    const current = Array.isArray(notif.disabled_for)
-      ? notif.disabled_for
-      : (notif.disabled_for ? JSON.parse(notif.disabled_for) : []);
+    let current = [];
+    try {
+      current = Array.isArray(notif.disabled_for)
+        ? notif.disabled_for
+        : (notif.disabled_for ? JSON.parse(notif.disabled_for) : []);
+    } catch { current = []; }
     const updated = current.includes(role)
       ? current.filter(r => r !== role)
       : [...current, role];
@@ -583,9 +591,12 @@ function NotificationHistoryPanel({ history, isHost, showToast }) {
         <div style={{padding:"24px",textAlign:"center",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>No announcements yet</div>
       ) : (
         history.map(n => {
-          const disabledFor = Array.isArray(n.disabled_for)
-            ? n.disabled_for
-            : (n.disabled_for ? JSON.parse(n.disabled_for) : []);
+          let disabledFor = [];
+          try {
+            disabledFor = Array.isArray(n.disabled_for)
+              ? n.disabled_for
+              : (n.disabled_for ? JSON.parse(n.disabled_for) : []);
+          } catch { disabledFor = []; }
           const sentTo = n.recipients || ["judge","emcee","attendee","organizer"];
           const allDisabled = sentTo.every(r => disabledFor.includes(r));
           return (
