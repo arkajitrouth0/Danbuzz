@@ -2164,98 +2164,130 @@ function WinnerDashboard({ event, categories, participants, battles, allRounds }
 // Only visible when the user logged in with matching name+city+phone
 // ─────────────────────────────────────────────────────────────────
 function ParticipantFeedbackView({ event, participant, allRounds, col }) {
-  const [feedbacks, setFeedbacks] = useState([]);
-  const [scores, setScores]       = useState([]);
-  const [loading, setLoading]     = useState(true);
+  const [feedbacks, setFeedbacks]         = useState([]);
+  const [myScores, setMyScores]           = useState([]);
+  const [allScores, setAllScores]         = useState([]);
+  const [catParticipants, setCatParticipants] = useState([]);
+  const [loading, setLoading]             = useState(true);
   const rounds = allRounds || ["Prelims"];
 
   useEffect(()=>{
     const load = async () => {
       setLoading(true);
-      const [fbRes, scRes] = await Promise.all([
+      const [fbRes, scRes, pRes] = await Promise.all([
         supabase.from("judge_feedback").select("*")
           .eq("event_id", event.id)
           .eq("participant_id", participant.id)
           .order("created_at", { ascending: false }),
-        supabase.from("scores").select("*")
-          .eq("event_id", event.id),
+        // Fetch all scores for event — filter client-side (same as rest of app)
+        supabase.from("scores").select("*").eq("event_id", event.id),
+        // Only participants of same category
+        supabase.from("participants").select("*")
+          .eq("event_id", event.id)
+          .eq("category", participant.category),
       ]);
+      const allSc = scRes.data || [];
       setFeedbacks(fbRes.data || []);
-      setScores((scRes.data || []).filter(s => s.participant_id === participant.id));
+      setMyScores(allSc.filter(s => s.participant_id === participant.id));
+      setAllScores(allSc);
+      setCatParticipants(pRes.data || []);
       setLoading(false);
     };
     load();
-    const ch = supabase.channel(`fb-${event.id}-${participant.id}`)
+    const ch = supabase.channel(`pfv-${event.id}-${participant.id}`)
       .on("postgres_changes", { event:"INSERT", schema:"public", table:"judge_feedback", filter:`event_id=eq.${event.id}` },
         (p) => { if(p.new.participant_id===participant.id) setFeedbacks(prev=>[p.new,...prev]); })
       .on("postgres_changes", { event:"INSERT", schema:"public", table:"scores", filter:`event_id=eq.${event.id}` },
-        (p) => { if(p.new.participant_id===participant.id) setScores(prev=>[...prev,p.new]); })
+        (p) => { setAllScores(prev=>[...prev,p.new]); if(p.new.participant_id===participant.id) setMyScores(prev=>[...prev,p.new]); })
       .on("postgres_changes", { event:"UPDATE", schema:"public", table:"scores", filter:`event_id=eq.${event.id}` },
-        (p) => { if(p.new.participant_id===participant.id) setScores(prev=>prev.map(s=>s.id===p.new.id?p.new:s)); })
+        (p) => { setAllScores(prev=>prev.map(s=>s.id===p.new.id?p.new:s)); if(p.new.participant_id===participant.id) setMyScores(prev=>prev.map(s=>s.id===p.new.id?p.new:s)); })
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [event.id, participant.id]);
+  }, [event.id, participant.id, participant.category]);
 
-  // Total prelim score
-  const totalScore = scores.reduce((a,s)=>a+s.score,0);
-  const judgeCount = scores.length;
+  // My total score only (no individual judge breakdown shown to participant)
+  const myTotal = myScores.reduce((a,s)=>a+(s.score||0), 0);
+  const myJudgeCount = myScores.length;
 
-  const grouped = useMemo(() => {
-    const map = {};
-    feedbacks.forEach(fb => {
-      const r = fb.round || "General";
-      if (!map[r]) map[r] = [];
-      map[r].push(fb);
-    });
+  // Category leaderboard — total score per participant, same category only
+  const leaderboard = useMemo(()=>{
+    return catParticipants
+      .filter(p=>p.checked_in)
+      .map(p=>({
+        ...p,
+        total: allScores.filter(s=>s.participant_id===p.id).reduce((a,s)=>a+(s.score||0),0),
+        scored: allScores.some(s=>s.participant_id===p.id),
+      }))
+      .sort((a,b)=>b.total-a.total);
+  }, [catParticipants, allScores]);
+
+  const grouped = useMemo(()=>{
+    const map={};
+    feedbacks.forEach(fb=>{ const r=fb.round||"General"; if(!map[r])map[r]=[]; map[r].push(fb); });
     return map;
   }, [feedbacks]);
 
-  const roundOrder = [...rounds, "General"].filter(r => grouped[r]?.length);
+  const roundOrder = [...rounds,"General"].filter(r=>grouped[r]?.length);
 
-  if (loading) return <div style={{padding:"48px",textAlign:"center"}}><Spinner/></div>;
+  if(loading) return <div style={{padding:"48px",textAlign:"center"}}><Spinner/></div>;
 
   return (
     <div className="slide">
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4,flexWrap:"wrap"}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:"#a855f7"}}>💬 MY SCORES & FEEDBACK</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:"#a855f7"}}>🏅 MY SCORES & FEEDBACK</div>
         <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",background:"#a855f722",border:"1px solid #a855f744",borderRadius:10,padding:"2px 10px"}}>{participant.name} · {participant.category}</span>
       </div>
-      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:16}}>Your prelim scores and private judge feedback — visible only to you.</div>
+      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:16}}>Your scores and private feedback — visible only to you.</div>
 
-      {/* ── PRELIM SCORE CARD ── */}
-      <div style={{background:"#0f0b1e",border:`1px solid ${judgeCount>0?"#ffd70044":"#1a1a1a"}`,borderRadius:12,padding:"18px 20px",marginBottom:24}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:"#ffd700",marginBottom:10}}>PRELIM SCORES</div>
-        {judgeCount===0?(
+      {/* ── MY TOTAL SCORE — no individual judge breakdown ── */}
+      <div style={{background:"#0f0b1e",border:`1px solid ${myJudgeCount>0?"#ffd70044":"#1a1a1a"}`,borderRadius:12,padding:"18px 20px",marginBottom:20}}>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:"#ffd700",marginBottom:8}}>MY PRELIM SCORE</div>
+        {myJudgeCount===0?(
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>No scores submitted yet.</div>
         ):(
-          <>
-            <div style={{display:"flex",alignItems:"flex-end",gap:6,marginBottom:14}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:52,color:"#ffd700",lineHeight:1}}>{totalScore}</div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:8}}>TOTAL · {judgeCount} judge{judgeCount!==1?"s":""}</div>
-            </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {scores.map((s,i)=>(
-                <div key={s.id||i} style={{background:"#1c1232",border:"1px solid #3d2080",borderRadius:8,padding:"8px 14px",textAlign:"center",minWidth:64}}>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",marginBottom:2,letterSpacing:1}}>{s.judge_key||`J${i+1}`}</div>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:24,color:"#ffd700"}}>{s.score}</div>
-                </div>
-              ))}
-            </div>
-          </>
+          <div style={{display:"flex",alignItems:"flex-end",gap:8}}>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:56,color:"#ffd700",lineHeight:1}}>{myTotal}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:10}}>TOTAL</div>
+          </div>
         )}
       </div>
 
-      {/* ── FEEDBACK ── */}
+      {/* ── CATEGORY STANDINGS — total scores only, same category ── */}
+      <div style={{background:"#0f0b1e",border:"1px solid #1e1840",borderRadius:12,padding:"18px 20px",marginBottom:20}}>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:10}}>{participant.category} — STANDINGS</div>
+        {leaderboard.length===0?(
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>No checked-in participants yet.</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            {leaderboard.map((p,i)=>{
+              const isMe=p.id===participant.id;
+              return (
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:8,background:isMe?col.bg:"transparent",border:isMe?`1px solid ${col.border}`:"1px solid transparent"}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:i<3?col.primary:"#3d2080",minWidth:28}}>#{i+1}</div>
+                  <div style={{flex:1}}>
+                    <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:isMe?col.primary:"#fff"}}>{p.name}</span>
+                    {isMe&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:col.primary,marginLeft:7,letterSpacing:1,background:col.bg,border:`1px solid ${col.border}`,borderRadius:6,padding:"1px 6px"}}>YOU</span>}
+                  </div>
+                  {/* Only total score shown — no individual judge scores */}
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:isMe?col.primary:i<3?"#fff":"#55449a"}}>{p.scored?p.total:"—"}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── JUDGE FEEDBACK ── */}
       <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:"#a855f7",marginBottom:12}}>JUDGE FEEDBACK</div>
-      {feedbacks.length === 0 ? (
+      {feedbacks.length===0?(
         <div style={{background:"#0f0b1e",border:"1px solid #1a1a1a",borderRadius:12,padding:"36px",textAlign:"center"}}>
           <div style={{fontSize:28,marginBottom:10}}>💭</div>
           <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:3,color:"#3d2080",marginBottom:4}}>NO FEEDBACK YET</div>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>Judges haven't submitted feedback yet. Check back later.</div>
         </div>
-      ) : (
+      ):(
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
-          {roundOrder.map(round => (
+          {roundOrder.map(round=>(
             <div key={round}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:round==="Prelims"?"#ffd700":round==="General"?"#7755aa":col.primary}}>{round}</div>
@@ -2263,7 +2295,7 @@ function ParticipantFeedbackView({ event, participant, allRounds, col }) {
                 <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>{grouped[round].length} note{grouped[round].length!==1?"s":""}</span>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {grouped[round].map((fb,i) => (
+                {grouped[round].map((fb,i)=>(
                   <div key={fb.id||i} style={{background:"#0f0b1e",border:"1px solid #1e1840",borderRadius:12,padding:"16px 18px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
                       <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:2,color:"#a855f7"}}>{fb.judge_name||"Judge"}</span>
