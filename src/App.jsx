@@ -1331,6 +1331,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
     }
     setFeedbackSending(prev => ({...prev, [key]: false}));
   };
+
+  const submitPrelimScore=async(pid)=>{
     const val=parseFloat(scoreInputs[pid]);
     if(isNaN(val)||val<1||val>10)return showToast("Score must be 1–10","error");
     const existing=scores.find(s=>s.participant_id===pid&&s.judge_key===myKey&&s.event_id===event.id);
