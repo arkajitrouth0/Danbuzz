@@ -1058,35 +1058,19 @@ function OrgLoginScreen({ onBack, onLogin, showToast }) {
 function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
   const [viewerCode,setViewerCode]=useState("");
   const [name,setName]=useState("");
-  const [city,setCity]=useState("");
-  const [phone,setPhone]=useState("");
   const [loading,setLoading]=useState(false);
 
   const handleJoin=async()=>{
     if(!viewerCode.trim())return showToast("Enter the viewer code!","error");
     if(!name.trim())return showToast("Enter your name!","error");
-    if(!city.trim())return showToast("Enter your city!","error");
-    if(!phone.trim())return showToast("Enter your phone!","error");
     setLoading(true);
-
-    // Step 1: Find event by viewer_code
     const upper=viewerCode.trim().toUpperCase();
     const{data:evData,error:evErr}=await supabase.from("events").select("*").eq("viewer_code",upper).single();
     if(evErr||!evData){showToast("Invalid viewer code!","error");setLoading(false);return;}
-
-    // Step 2: Check if this person is a registered participant in this event
-    // Match by name + city + phone — same fields used during registration
-    const{data:partData}=await supabase.from("participants").select("*")
-      .eq("event_id",evData.id);
-
-    const matchedParticipant = (partData||[]).find(p=>
-      p.name.trim().toLowerCase()===name.trim().toLowerCase()&&
-      p.city.trim().toLowerCase()===city.trim().toLowerCase()&&
-      (p.phone||"").trim()===phone.trim()
-    );
-
+    const{data:partData}=await supabase.from("participants").select("*").eq("event_id",evData.id);
+    const matchedParticipant=(partData||[]).find(p=>p.name.trim().toLowerCase()===name.trim().toLowerCase());
     if(matchedParticipant){
-      showToast(`Welcome, ${matchedParticipant.name}! Your feedback is available.`);
+      showToast(`Welcome, ${matchedParticipant.name}! Your scores & feedback are available.`);
       onLogin({event:evData,name:matchedParticipant.name,role:"participant",participant:matchedParticipant});
     } else {
       showToast(`Welcome, ${name.trim()}! Loading live view…`);
@@ -1097,30 +1081,20 @@ function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"linear-gradient(160deg,#0a0612,#0d0a22,#0a0e1a)"}}>
-      <div style={{width:"100%",maxWidth:420}}>
+      <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#7755aa",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 ATTENDEE & PARTICIPANT LOGIN</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 VIEWER & PARTICIPANT LOGIN</div>
         <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:20,padding:"10px 14px",background:"#0f0b1e",borderRadius:8,border:"1px solid #1a1540",lineHeight:1.6}}>
-          <div style={{marginBottom:4}}><span style={{color:"#00e5ff",fontWeight:700}}>Viewers:</span> Enter the viewer code + your name, city &amp; phone to watch live.</div>
-          <div><span style={{color:"#a855f7",fontWeight:700}}>Participants:</span> Enter the same viewer code + the name, city &amp; phone you registered with — you'll also see your judge feedback.</div>
+          <div style={{marginBottom:4}}><span style={{color:"#00e5ff",fontWeight:700}}>Viewer:</span> Enter viewer code + your name to watch live.</div>
+          <div><span style={{color:"#a855f7",fontWeight:700}}>Participant:</span> Same — if your name matches a registered dancer, you'll also see your scores &amp; feedback.</div>
         </div>
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>VIEWER CODE <span style={{color:"#ff4d4d"}}>*</span></div>
           <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={viewerCode} onChange={e=>setViewerCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleJoin()} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME <span style={{color:"#ff4d4d"}}>*</span></div>
-            <input className="inp" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
-          </div>
-          <div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>CITY <span style={{color:"#ff4d4d"}}>*</span></div>
-            <input className="inp" placeholder="Your city" value={city} onChange={e=>setCity(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
-          </div>
-        </div>
         <div style={{marginBottom:20}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>PHONE <span style={{color:"#ff4d4d"}}>*</span></div>
-          <input className="inp" placeholder="Phone number" value={phone} onChange={e=>setPhone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME <span style={{color:"#ff4d4d"}}>*</span></div>
+          <input className="inp" placeholder="Your name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
         </div>
         <button className="btn" style={{background:"linear-gradient(135deg,#00e5ff,#3b82f6)",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={handleJoin} disabled={loading}>{loading?<Spinner/>:"ENTER →"}</button>
       </div>
@@ -2203,11 +2177,9 @@ function ParticipantFeedbackView({ event, participant, allRounds, col }) {
     return () => supabase.removeChannel(ch);
   }, [event.id, participant.id, participant.category]);
 
-  // My total only — no individual judge breakdown
-  const myTotal    = myScores.reduce((a,s)=>a+(s.score||0), 0);
+  const myTotal      = myScores.reduce((a,s)=>a+(s.score||0), 0);
   const myJudgeCount = myScores.length;
 
-  // Category standings — total score per participant, same category only, no per-judge scores
   const leaderboard = useMemo(()=>
     catParticipants
       .filter(p=>p.checked_in)
@@ -2237,7 +2209,7 @@ function ParticipantFeedbackView({ event, participant, allRounds, col }) {
       </div>
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:16}}>Your scores and private feedback — visible only to you.</div>
 
-      {/* MY TOTAL SCORE — no individual judge scores shown */}
+      {/* MY TOTAL SCORE */}
       <div style={{background:"#0f0b1e",border:`1px solid ${myJudgeCount>0?"#ffd70044":"#1a1a1a"}`,borderRadius:12,padding:"18px 20px",marginBottom:16}}>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:"#ffd700",marginBottom:8}}>MY PRELIM SCORE</div>
         {myJudgeCount===0
@@ -2249,7 +2221,7 @@ function ParticipantFeedbackView({ event, participant, allRounds, col }) {
         }
       </div>
 
-      {/* CATEGORY STANDINGS — total only, same category only */}
+      {/* CATEGORY STANDINGS — total only, same category only, no per-judge scores */}
       <div style={{background:"#0f0b1e",border:"1px solid #1e1840",borderRadius:12,padding:"18px 20px",marginBottom:16}}>
         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:10}}>{participant.category} — STANDINGS</div>
         {leaderboard.length===0
