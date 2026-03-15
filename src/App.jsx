@@ -87,26 +87,31 @@ const detectBias = (scoreMap={}) => {
 // ─────────────────────────────────────────────────────────────────
 
 // ── KNOCKOUT JUDGE DECISION ENGINE ─────────────────────────────
-// IMPORTANT: A battle is only resolved once ALL registered judges for
-// that category have submitted their decision. One judge cannot decide alone.
 //
-// 5 rules (2-way and 3-way battles):
-//   a) UNANIMOUS  — all judges pick same dancer → that dancer wins
-//   b) MAJORITY   — more judges pick A than any other choice → A wins
-//   c) ALL TIE    — every judge submits a tie card → re-battle
-//   d) SPLIT EVEN — two dancers tied in wins → re-battle
-//   e) TIE + WIN  — tie votes only block if they create a genuine deadlock
+// 2-WAY BATTLE:
+//   a) UNANIMOUS / MAJORITY  — more judges pick A → A wins
+//   b) ALL TIE               — all judges mark tie → re-battle same two
+//   c) SPLIT EVEN            — tied vote count → re-battle same two
 //
-// totalRegisteredJudges: the number of judge codes registered for this category.
-// Until all judges have voted, status remains "pending".
+// 3-WAY BATTLE (new correct logic):
+//   Phase 1 — All judges vote for 1 of 3 dancers.
+//     → If 1 dancer gets 0 votes → auto-eliminated.
+//     → The remaining 2 dancers move to Phase 2 (name card / tie card).
+//     → If all 3 dancers get votes → standard majority rules:
+//         · One dancer has most votes → wins outright (3-way decided)
+//         · Two dancers tied → those two re-battle (3-way tie, p3 eliminated)
+//         · All three tied (only possible with 3 judges, 1 vote each) → full re-battle
+//   Phase 2 — 2-dancer runoff (tie_round incremented, p3 set to null in new decisions)
+//     → Normal 2-way name card / tie card rules apply
+//
+// totalRegisteredJudges: wait for ALL judges before resolving.
 const resolveBattle = (decisions = [], totalRegisteredJudges = 0) => {
   if (!decisions.length) return { status: "pending", tie_round: 0 };
   const maxTieRound = Math.max(...decisions.map(d => d.tie_round ?? 0));
   const current = decisions.filter(d => (d.tie_round ?? 0) === maxTieRound);
   if (!current.length) return { status: "pending", tie_round: maxTieRound };
 
-  // CORE FIX: If we know the total judges, wait until ALL have voted
-  // Only proceed to resolve if every registered judge has submitted
+  // Wait for ALL registered judges to vote
   if (totalRegisteredJudges > 0 && current.length < totalRegisteredJudges) {
     return { status: "pending", tie_round: maxTieRound, votesIn: current.length, totalJudges: totalRegisteredJudges };
   }
@@ -115,38 +120,120 @@ const resolveBattle = (decisions = [], totalRegisteredJudges = 0) => {
   const p2Id = current[0].p2_id;
   const p3Id = current[0].p3_id || null;
   const totalJudges = current.length;
+  const is3way = !!p3Id;
 
   const tieVotes = current.filter(d => d.is_tie).length;
   const p1Wins   = current.filter(d => !d.is_tie && d.winner_id === p1Id).length;
   const p2Wins   = current.filter(d => !d.is_tie && d.winner_id === p2Id).length;
-  const p3Wins   = p3Id ? current.filter(d => !d.is_tie && d.winner_id === p3Id).length : 0;
+  const p3Wins   = is3way ? current.filter(d => !d.is_tie && d.winner_id === p3Id).length : 0;
 
-  const allParticipantWins = p3Id ? [p1Wins, p2Wins, p3Wins] : [p1Wins, p2Wins];
+  // ── 3-WAY PHASE 1 LOGIC ────────────────────────────────────────
+  if (is3way) {
+    // All tie votes → full re-battle all three
+    if (tieVotes === totalJudges) {
+      return { status: "tied", winner_id: null, winner_name: null, tie_round: maxTieRound, is3way: true };
+    }
+
+    const voteCounts = [
+      { id: p1Id, name: current[0].p1_name, wins: p1Wins },
+      { id: p2Id, name: current[0].p2_name, wins: p2Wins },
+      { id: p3Id, name: current[0].p3_name, wins: p3Wins },
+    ];
+
+    // Find who got 0 votes (eliminated)
+    const eliminated = voteCounts.filter(p => p.wins === 0);
+    const surviving  = voteCounts.filter(p => p.wins > 0);
+
+    if (eliminated.length === 1 && surviving.length === 2) {
+      // Exactly one dancer got 0 votes → eliminated
+      // The other two move to a 2-person runoff
+      const [s1, s2] = surviving;
+      const maxSurvivorWins = Math.max(s1.wins, s2.wins);
+      if (s1.wins !== s2.wins) {
+        // One survivor has more votes → wins outright
+        const winner = s1.wins > s2.wins ? s1 : s2;
+        return {
+          status: "decided",
+          winner_id: winner.id,
+          winner_name: winner.name,
+          tie_round: maxTieRound,
+          eliminated_id: eliminated[0].id,
+          eliminated_name: eliminated[0].name,
+          runoff: false,
+        };
+      } else {
+        // Survivors are tied → 2-person runoff (tie_round+1, name card / tie card)
+        return {
+          status: "runoff",
+          winner_id: null,
+          winner_name: null,
+          tie_round: maxTieRound,
+          eliminated_id: eliminated[0].id,
+          eliminated_name: eliminated[0].name,
+          runoff_p1_id: s1.id,
+          runoff_p1_name: s1.name,
+          runoff_p2_id: s2.id,
+          runoff_p2_name: s2.name,
+          is3way: true,
+        };
+      }
+    }
+
+    if (eliminated.length === 2) {
+      // Two dancers got 0 votes → the one who got all votes wins
+      const winner = surviving[0];
+      return { status: "decided", winner_id: winner.id, winner_name: winner.name, tie_round: maxTieRound };
+    }
+
+    // All 3 got votes — check majority
+    const maxWins3 = Math.max(p1Wins, p2Wins, p3Wins);
+    const leaders3 = voteCounts.filter(p => p.wins === maxWins3);
+    if (leaders3.length === 1) {
+      // One dancer leads outright
+      return { status: "decided", winner_id: leaders3[0].id, winner_name: leaders3[0].name, tie_round: maxTieRound };
+    }
+    if (leaders3.length === 2) {
+      // Two tied at top, third eliminated → runoff between the two leaders
+      const loser = voteCounts.find(p => p.wins < maxWins3);
+      return {
+        status: "runoff",
+        winner_id: null,
+        winner_name: null,
+        tie_round: maxTieRound,
+        eliminated_id: loser?.id,
+        eliminated_name: loser?.name,
+        runoff_p1_id: leaders3[0].id,
+        runoff_p1_name: leaders3[0].name,
+        runoff_p2_id: leaders3[1].id,
+        runoff_p2_name: leaders3[1].name,
+        is3way: true,
+      };
+    }
+    // All 3 tied → full re-battle
+    return { status: "tied", winner_id: null, winner_name: null, tie_round: maxTieRound, is3way: true };
+  }
+
+  // ── 2-WAY BATTLE LOGIC ─────────────────────────────────────────
+  const allParticipantWins = [p1Wins, p2Wins];
   const maxWins = Math.max(...allParticipantWins);
 
-  // Rule (c): all judges gave tie → re-battle
   if (tieVotes === totalJudges) {
     return { status: "tied", winner_id: null, winner_name: null, tie_round: maxTieRound };
   }
 
-  // Rule (a) + (b): unanimous or clear majority
   const leadersCount = allParticipantWins.filter(w => w === maxWins).length;
 
   if (maxWins > 0 && leadersCount === 1) {
-    const leader = p3Id
-      ? (p1Wins===maxWins ? {id:p1Id, name:current[0].p1_name}
-        : p2Wins===maxWins ? {id:p2Id, name:current[0].p2_name}
-        : {id:p3Id, name:current[0].p3_name})
-      : (p1Wins===maxWins ? {id:p1Id, name:current[0].p1_name} : {id:p2Id, name:current[0].p2_name});
+    const leader = p1Wins === maxWins
+      ? { id: p1Id, name: current[0].p1_name }
+      : { id: p2Id, name: current[0].p2_name };
     return { status: "decided", winner_id: leader.id, winner_name: leader.name, tie_round: maxTieRound };
   }
 
-  // Rule (d): two+ dancers tied → re-battle
   if (leadersCount > 1) {
     return { status: "tied", winner_id: null, winner_name: null, tie_round: maxTieRound };
   }
 
-  // Still waiting
   return { status: "pending", tie_round: maxTieRound };
 };
 
@@ -158,8 +245,21 @@ const getJudgeCount = (judgeCodes, category) =>
 const resolveBattleForCategory = (decisions, judgeCodes, category) =>
   resolveBattle(decisions, getJudgeCount(judgeCodes, category));
 
-// Get the ordered list of rounds from the event (excluding Prelims)
-const getKnockoutRounds = (eventRounds) =>
+// Helper: get human-readable battle status for display components
+const getBattleStatusLabel = (result) => {
+  if (result.status === "decided") return { text: `🏆 ${result.winner_name} advances`, color: "#00c853" };
+  if (result.status === "runoff")  return { text: `⚡ RUNOFF — ${result.eliminated_name} eliminated · 2 remain`, color: "#ff9800" };
+  if (result.status === "tied")    return { text: `🤝 TIE × ${(result.tie_round||0)+1} — extra battle needed`, color: "#ffd700" };
+  return { text: "Judges voting…", color: "#55449a" };
+};
+
+// Helper: border color for battle card based on status
+const getBattleBorderColor = (result, colBorder) => {
+  if (result.status === "decided") return colBorder;
+  if (result.status === "runoff")  return "#ff980055";
+  if (result.status === "tied")    return "#ffd70044";
+  return "#2a1f4a";
+};
   (eventRounds || []).filter(r => r !== "Prelims");
 
 // Given prelim-ranked list, build the battles for the FIRST knockout round.
@@ -1352,15 +1452,26 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
               const allDecs        = getBattleDecisions(battle.match_index);
               const resolved       = resolveBattle(allDecs, totalJudgesForCat);
               const activeTieRound = resolved.tie_round ?? 0;
-              const currentTieRound = resolved.status === "tied" ? activeTieRound + 1 : activeTieRound;
+              // runoff = 3-way phase 1 done, now 2-way runoff at tie_round+1
+              const isRunoff       = resolved.status === "runoff";
+              const currentTieRound = (resolved.status === "tied" || isRunoff) ? activeTieRound + 1 : activeTieRound;
               const myDec          = getMyDecision(battle.match_index, currentTieRound);
               const uiKey          = `${battle.match_index}-${currentTieRound}`;
               const uiChoice       = battleChoices[uiKey];
-              const fighters       = [battle.p1, battle.p2, ...(battle.p3 ? [battle.p3] : [])];
-              const is3way         = !!battle.p3;
+
+              // In runoff: only show the 2 surviving dancers as name cards
+              const runoffFighters = isRunoff
+                ? [
+                    { id: resolved.runoff_p1_id, name: resolved.runoff_p1_name, city: "" },
+                    { id: resolved.runoff_p2_id, name: resolved.runoff_p2_name, city: "" },
+                  ].map(r => [battle.p1, battle.p2, ...(battle.p3?[battle.p3]:[])].find(p=>p.id===r.id) || r)
+                : null;
+
+              const fighters       = runoffFighters || [battle.p1, battle.p2, ...(battle.p3 ? [battle.p3] : [])];
+              const is3way         = !!battle.p3 && !isRunoff;
               const chosen         = uiChoice?.winner_id ?? myDec?.winner_id;
               const tieChosen      = uiChoice?.is_tie ?? (!!myDec && myDec.is_tie);
-              const isTieBreaker   = currentTieRound > 0;
+              const isTieBreaker   = currentTieRound > 0 && !isRunoff;
               const isDecided      = resolved.status === "decided";
               const currentVotes   = allDecs.filter(d=>(d.tie_round??0)===currentTieRound).length;
 
@@ -1372,18 +1483,28 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                       BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}
                     </span>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      {is3way&&<span className="badge" style={{background:"#ff980022",color:"#ff9800",border:"1px solid #ff980044"}}>3-WAY BATTLE</span>}
+                      {is3way&&!isRunoff&&<span className="badge" style={{background:"#ff980022",color:"#ff9800",border:"1px solid #ff980044"}}>3-WAY BATTLE</span>}
+                      {isRunoff&&<span className="badge" style={{background:"#ff4d4d22",color:"#ff4d4d",border:"1px solid #ff4d4d44"}}>⚡ RUNOFF · 1 ELIMINATED</span>}
                       {isTieBreaker&&<span className="badge" style={{background:"#ffd70022",color:"#ffd700",border:"1px solid #ffd70044"}}>🔄 TIE BREAK ×{currentTieRound}</span>}
                       {isDecided&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ DECIDED</span>}
                       {resolved.status==="tied"&&<span className="badge" style={{background:"#ffd70022",color:"#ffd700",border:"1px solid #ffd70044"}}>🤝 TIE — EXTRA BATTLE</span>}
-                      {!isDecided&&resolved.status!=="tied"&&totalJudgesForCat>0&&(
+                      {!isDecided&&resolved.status!=="tied"&&!isRunoff&&totalJudgesForCat>0&&(
                         <span className="badge" style={{background:currentVotes===totalJudgesForCat?"#00c85322":"#1c1232",color:currentVotes===totalJudgesForCat?"#00c853":"#7755aa",border:`1px solid ${currentVotes===totalJudgesForCat?"#00c85344":"#3d2080"}`}}>
                           {currentVotes}/{totalJudgesForCat} VOTED
                         </span>
                       )}
-                      {myDec&&!isDecided&&resolved.status!=="tied"&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ MY VOTE IN</span>}
+                      {myDec&&!isDecided&&resolved.status!=="tied"&&!isRunoff&&<span className="badge" style={{background:"#00c85322",color:"#00c853",border:"1px solid #00c85344"}}>✓ MY VOTE IN</span>}
                     </div>
                   </div>
+
+                  {/* Runoff: show eliminated dancer first */}
+                  {isRunoff&&(
+                    <div style={{background:"#150608",borderBottom:"1px solid #1a1a1a",padding:"10px 18px",display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:"#ff4d4d",letterSpacing:2}}>✗ ELIMINATED</span>
+                      <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,color:"#ff4d4d55",textDecoration:"line-through"}}>{resolved.eliminated_name}</span>
+                      <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",marginLeft:"auto"}}>No judge picked them</span>
+                    </div>
+                  )}
 
                   {isDecided?(
                     <div>
@@ -1399,7 +1520,13 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                     </div>
                   ):(
                     <div>
-                      {/* Name cards — 2-col for 2-way, 3-col for 3-way */}
+                      {/* Runoff info banner */}
+                      {isRunoff&&(
+                        <div style={{background:"#0a1a1a",borderBottom:"1px solid #1a1a1a",padding:"8px 18px",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00e5ff"}}>
+                          ⚡ Runoff — judges split votes. Pick one of the 2 remaining dancers or submit a Tie Card.
+                        </div>
+                      )}
+                      {/* Name cards — 2-col always in runoff, 3-col for 3-way phase 1 */}
                       <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr 1fr",gap:0}}>
                         {fighters.map((p,fi)=>{
                           const isSelected = chosen===p.id && !tieChosen;
@@ -1426,13 +1553,16 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                         })}
                       </div>
 
-                      {/* Actions */}
+                      {/* Actions — tie card available in runoff (2-way) and normal 2-way, NOT in 3-way phase 1 */}
                       <div style={{padding:"12px 18px",background:"#0b0818",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",borderTop:"1px solid #1a1a1a"}}>
-                        {!is3way&&(
+                        {(!is3way || isRunoff)&&(
                           <button className="btn" style={{fontSize:11,background:tieChosen?"#ffd70022":"#1c1232",color:tieChosen?"#ffd700":"#7755aa",border:`1px solid ${tieChosen?"#ffd700":"#3d2080"}`}}
                             onClick={()=>setBattleChoices(prev=>({...prev,[uiKey]:{winner_id:null,is_tie:true}}))}>
                             🤝 {tieChosen?"✓ TIE CARD SELECTED":"TIE CARD"}
                           </button>
+                        )}
+                        {is3way&&!isRunoff&&(
+                          <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff9800"}}>3-WAY — pick one winner, no tie card</span>
                         )}
                         {isTieBreaker&&(
                           <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ffd700"}}>🔄 Extra battle ×{currentTieRound} — pick a winner</span>
@@ -1442,11 +1572,16 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                           onClick={()=>{
                             const ch=uiChoice||{winner_id:chosen,is_tie:tieChosen};
                             if(!ch.is_tie&&!ch.winner_id)return showToast("Select a name card first!","error");
-                            submitBattleDecision(battle,ch.winner_id,ch.is_tie,currentTieRound);
+                            // In runoff: pass a modified battle with only the 2 surviving fighters (no p3)
+                            // so Phase 2 decisions are stored correctly as a 2-way battle
+                            const battleForSubmit = isRunoff
+                              ? { ...battle, p1: fighters[0], p2: fighters[1], p3: null }
+                              : battle;
+                            submitBattleDecision(battleForSubmit,ch.winner_id,ch.is_tie,currentTieRound);
                           }}>
                           {myDec?"UPDATE →":"SUBMIT CARD →"}
                         </button>
-                        {tieChosen&&!is3way&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>Both battle again · same dancers</span>}
+                        {tieChosen&&(!is3way||isRunoff)&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>Both battle again · same 2 dancers</span>}
                       </div>
                     </div>
                   )}
@@ -1481,16 +1616,19 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
                         const result=resolveBattle(decs);
                         const isDecided=result.status==="decided";
                         const isTied=result.status==="tied";
+                        const isRunoff=result.status==="runoff";
                         const myDecInBattle=decs.find(d=>d.judge_key===myKey);
+                        const displayFighters=fighters.filter(p=>!isRunoff||p.id!==result.eliminated_id);
                         return (
-                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
-                            {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY</div>}
-                            {fighters.map((p,fi)=>{
+                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${getBattleBorderColor(result,col.border)}`,borderRadius:10,overflow:"hidden"}}>
+                            {is3way&&!isRunoff&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY</div>}
+                            {isRunoff&&<div style={{padding:"3px 10px",background:"#150608",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff4d4d"}}>✗ {result.eliminated_name} ELIMINATED</div>}
+                            {displayFighters.map((p,fi)=>{
                               const isWinner=isDecided&&result.winner_id===p.id;
                               const isLoser=isDecided&&result.winner_id!==p.id;
                               const myVote=myDecInBattle&&!myDecInBattle.is_tie&&myDecInBattle.winner_id===p.id;
                               return (
-                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<displayFighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
                                   <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div></div>
                                   {myVote&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:8,color:col.primary,letterSpacing:1}}>MY PICK</span>}
                                   {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:col.primary}}>🏆</span>}
@@ -1736,17 +1874,24 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
                   const votedCount = [...new Set(decs.filter(d=>(d.tie_round??0)===(result.tie_round??0)).map(d=>d.judge_key))].length;
                   const isTied = result.status === "tied";
                   const isDecided = result.status === "decided";
+                  const isRunoff = result.status === "runoff";
+                  const statusInfo = getBattleStatusLabel(result);
                   const pendingLabel = totalJudgesForCat > 0
                     ? `${votedCount}/${totalJudgesForCat} judges voted`
                     : `${votedCount} judge${votedCount!==1?"s":""} voted`;
                   return (
-                    <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
-                      {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
-                      {fighters.map((p,fi)=>{
+                    <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${getBattleBorderColor(result,col.border)}`,borderRadius:10,overflow:"hidden"}}>
+                      {is3way&&!isRunoff&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
+                      {isRunoff&&(
+                        <div style={{padding:"5px 14px",background:"#150608",borderBottom:"1px solid #1a1a1a",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff4d4d"}}>
+                          ✗ ELIMINATED: {result.eliminated_name} — 2 remain
+                        </div>
+                      )}
+                      {fighters.filter(p => !isRunoff || p.id !== result.eliminated_id).map((p,fi)=>{
                         const isWinner = isDecided && result.winner_id===p.id;
                         const isLoser  = isDecided && result.winner_id!==p.id;
                         return (
-                          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.filter(f=>!isRunoff||f.id!==result.eliminated_id).length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
                             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:"#55449a",minWidth:20}}>#{fi+1}</div>
                             <div style={{flex:1}}>
                               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:isWinner?col.primary:"#fff"}}>{p.name}</div>
@@ -1756,8 +1901,8 @@ function BracketTab({ event, activeCat, col, prelimRanked, participantMap, showT
                           </div>
                         );
                       })}
-                      <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:isTied?"#ffd700":isDecided?"#00c853":"#55449a"}}>
-                        {isTied?`🤝 TIE × ${result.tie_round+1} — extra battle needed`:isDecided?`🏆 ${result.winner_name} advances`:pendingLabel}
+                      <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:statusInfo.color}}>
+                        {isDecided||isTied||isRunoff ? statusInfo.text : pendingLabel}
                       </div>
                     </div>
                   );
@@ -2033,18 +2178,23 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
                     const result=resolveBattle(decs);
                     const isDecided=result.status==="decided";
                     const isTied=result.status==="tied";
+                    const isRunoff=result.status==="runoff";
+                    const statusInfo=getBattleStatusLabel(result);
+                    const displayFighters=fighters.filter(p=>!isRunoff||p.id!==result.eliminated_id);
                     return (
                       <div key={battle.match_index} className="battle-card">
                         <div style={{padding:"8px 18px",background:"#0b0818",fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a"}}>
-                          BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}
+                          BATTLE {battle.match_index+1}{is3way&&!isRunoff?" · 3-WAY":""}
                           {isDecided&&<span style={{color:"#00c853",marginLeft:12}}>✓ DECIDED</span>}
                           {isTied&&<span style={{color:"#e2e8f0",marginLeft:12,background:"#ffffff15",padding:"2px 8px",borderRadius:6,border:"1px solid #ffffff33"}}>🤝 TIE — EXTRA BATTLE × {result.tie_round+1}</span>}
+                          {isRunoff&&<span style={{color:"#ff9800",marginLeft:12,background:"#ff980015",padding:"2px 8px",borderRadius:6,border:"1px solid #ff980033"}}>⚡ RUNOFF</span>}
                         </div>
-                        {fighters.map((p,fi)=>{
+                        {isRunoff&&<div style={{padding:"6px 18px",background:"#150608",borderBottom:"1px solid #1a1a1a",fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff4d4d"}}>✗ Eliminated: {result.eliminated_name}</div>}
+                        {displayFighters.map((p,fi)=>{
                           const isWinner=isDecided&&result.winner_id===p.id;
                           const isLoser=isDecided&&result.winner_id!==p.id;
                           return (
-                            <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                            <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<displayFighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
                               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:"#55449a",minWidth:24}}>#{fi+1}</div>
                               <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
                               {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:col.primary,letterSpacing:2}}>🏆 WINNER → ADVANCES</span>}
@@ -2264,18 +2414,22 @@ function EmceeDashboard({ event, emceeName, onBack }) {
                         const result=resolveBattle(decs);
                         const isDecided=result.status==="decided";
                         const isTied=result.status==="tied";
+                        const isRunoff=result.status==="runoff";
+                        const displayFighters=fighters.filter(p=>!isRunoff||p.id!==result.eliminated_id);
                         return (
                           <div key={bi} className="battle-card" style={{marginBottom:14}}>
                             <div style={{padding:"10px 18px",background:"#0b0818",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <span>BATTLE {bi+1}{is3way?" · 3-WAY":""}</span>
+                              <span>BATTLE {bi+1}{is3way&&!isRunoff?" · 3-WAY":""}</span>
                               <div>
                                 {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
                                 {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>🤝 TIE × {result.tie_round+1}</span>}
+                                {isRunoff&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>⚡ RUNOFF · {result.eliminated_name} out</span>}
                                 {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa"}}>Judges deciding…</span>}
                               </div>
                             </div>
-                            <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
-                              {fighters.map((p,fi)=>{
+                            {isRunoff&&<div style={{padding:"5px 18px",background:"#150608",borderBottom:"1px solid #1a1a1a",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff4d4d"}}>✗ Eliminated: {result.eliminated_name}</div>}
+                            <div style={{display:"grid",gridTemplateColumns:displayFighters.length===3?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
+                              {displayFighters.map((p,fi)=>{
                                 const isWinner=isDecided&&result.winner_id===p.id;
                                 const isLoser=isDecided&&result.winner_id!==p.id;
                                 return (
@@ -2375,21 +2529,25 @@ function EmceeDashboard({ event, emceeName, onBack }) {
                         const result=resolveBattle(decs);
                         const isDecided=result.status==="decided";
                         const isTied=result.status==="tied";
+                        const isRunoff=result.status==="runoff";
+                        const statusInfo=getBattleStatusLabel(result);
+                        const displayFighters=fighters.filter(p=>!isRunoff||p.id!==result.eliminated_id);
                         return (
-                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
-                            {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
-                            {fighters.map((p,fi)=>{
+                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${getBattleBorderColor(result,col.border)}`,borderRadius:10,overflow:"hidden"}}>
+                            {is3way&&!isRunoff&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
+                            {isRunoff&&<div style={{padding:"3px 10px",background:"#150608",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff4d4d"}}>✗ {result.eliminated_name} ELIMINATED</div>}
+                            {displayFighters.map((p,fi)=>{
                               const isWinner=isDecided&&result.winner_id===p.id;
                               const isLoser=isDecided&&result.winner_id!==p.id;
                               return (
-                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<displayFighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
                                   <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div></div>
                                   {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:col.primary}}>🏆 WIN</span>}
                                 </div>
                               );
                             })}
-                            <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:isTied?"#ffd700":isDecided?"#00c853":"#55449a"}}>
-                              {isTied?`🤝 TIE × ${result.tie_round+1}`:isDecided?`🏆 ${result.winner_name} advances`:"Judges voting…"}
+                            <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:statusInfo.color}}>
+                              {isDecided||isTied||isRunoff?statusInfo.text:"Judges voting…"}
                             </div>
                           </div>
                         );
@@ -3072,16 +3230,19 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
                   const result = resolveWithForce(roundName,b.match_index,decs);
                   const isDecided = result.status==="decided";
                   const isTied    = result.status==="tied";
+                  const isRunoff  = result.status==="runoff";
                   const isForced  = result.forced;
                   const forceKey  = `${roundName}-${b.match_index}`;
+                  const displayFighters = fighters.filter(p=>!isRunoff||p.id!==result.eliminated_id);
 
                   return (
-                    <div key={i} style={{background:"#0b0818",border:`1px solid ${isDecided?col.border+"55":isTied?"#ffd70033":"#170f2c"}`,borderRadius:8,overflow:"hidden"}}>
+                    <div key={i} style={{background:"#0b0818",border:`1px solid ${isDecided?col.border+"55":isTied?"#ffd70033":isRunoff?"#ff980033":"#170f2c"}`,borderRadius:8,overflow:"hidden"}}>
                       <div style={{padding:"5px 14px",background:"#0a0612",fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:"#55449a",letterSpacing:2}}>
-                        BATTLE {i+1}{is3way&&<span style={{color:"#ff9800",marginLeft:8}}>3-WAY</span>}{isForced&&<span style={{color:"#ffd700",marginLeft:8}}>★ HOST OVERRIDE</span>}
+                        BATTLE {i+1}{is3way&&!isRunoff&&<span style={{color:"#ff9800",marginLeft:8}}>3-WAY</span>}{isRunoff&&<span style={{color:"#ff4d4d",marginLeft:8}}>RUNOFF</span>}{isForced&&<span style={{color:"#ffd700",marginLeft:8}}>★ HOST OVERRIDE</span>}
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
-                        {fighters.map((p,fi)=>{
+                      {isRunoff&&<div style={{padding:"4px 14px",background:"#150608",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff4d4d"}}>✗ Eliminated: {result.eliminated_name}</div>}
+                      <div style={{display:"grid",gridTemplateColumns:displayFighters.length===3?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
+                        {displayFighters.map((p,fi)=>{
                           const isWinner=isDecided&&result.winner_id===p.id;
                           const isLoser=isDecided&&result.winner_id!==p.id;
                           return (
@@ -3092,7 +3253,7 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
                               style={{padding:"12px 14px",textAlign:"center",
                                 opacity:isLoser?0.4:1,cursor:"pointer",
                                 background:isWinner?"#051a07":isLoser?"#150608":"#110d22",
-                                borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none",
+                                borderRight:fi<displayFighters.length-1?"1px solid #1a1a1a":"none",
                                 transition:"background .15s"}}>
                               <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:isWinner?col.primary:"#fff"}}>{p.name}</div>
                               <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div>
@@ -3101,8 +3262,7 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
                               {!isDecided&&!isForced&&(
                                 <button
                                   onClick={e=>{e.stopPropagation();
-                                    // Auto-advance the opponent(s)
-                                    const opponents=fighters.filter(f=>f.id!==p.id);
+                                    const opponents=displayFighters.filter(f=>f.id!==p.id);
                                     if(opponents.length===1){setForceWinners(fw=>({...fw,[forceKey]:opponents[0].id}));}
                                     showToast(`${p.name} marked absent — opponent advances`);
                                   }}
@@ -3115,8 +3275,9 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
                         })}
                       </div>
                       <div style={{padding:"5px 14px",background:"#0a0612",fontFamily:"Barlow,sans-serif",fontSize:9,
-                        color:isTied?"#ffd700":isDecided&&!isForced?"#00c853":isDecided&&isForced?"#ffd700":"#55449a"}}>
+                        color:isTied?"#ffd700":isRunoff?"#ff9800":isDecided&&!isForced?"#00c853":isDecided&&isForced?"#ffd700":"#55449a"}}>
                         {isTied?`🤝 TIE ×${result.tie_round+1} — use host override to advance`
+                          :isRunoff?`⚡ ${result.eliminated_name} eliminated — judges split, runoff in progress`
                           :isDecided&&isForced?`★ Host advanced: ${result.winner_name}`
                           :isDecided?`🏆 ${result.winner_name} advances (judges decided)`
                           :"Judges voting…"}
