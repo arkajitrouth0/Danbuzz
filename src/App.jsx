@@ -4,23 +4,17 @@ import { supabase } from "./supabase";
 // ─────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────
-// Standard preset rounds shown in the round-setup UI — organizer can also add ANY custom Top N
-const PRESET_POST_PRELIM_ROUNDS = ["Top 32", "Top 25", "Top 21", "Top 19", "Top 17", "Top 16", "Top 14", "Top 8", "Top 4", "Finals"];
+const ALL_POST_PRELIM_ROUNDS = ["Top 32", "Top 27", "Top 24", "Top 20", "Top 18", "Top 16", "Top 15", "Top 12", "Top 10", "Top 8", "Top 6", "Top 4", "Finals"];
+const ROUND_LIMIT = { Prelims: 999, "Top 32": 32, "Top 27": 27, "Top 24": 24, "Top 20": 20, "Top 18": 18, "Top 16": 16, "Top 15": 15, "Top 12": 12, "Top 10": 10, "Top 8": 8, "Top 6": 6, "Top 4": 4, Finals: 2 };
 
-// Extract the dancer-count limit from a round name (e.g. "Top 19" → 19, "Finals" → 2)
-const getRoundLimit = (roundName) => {
-  if (!roundName) return 2;
-  if (roundName === "Finals") return 2;
-  if (roundName === "Prelims") return 999;
-  const m = roundName.match(/^Top\s+(\d+)$/i);
+// getRoundSize: get the number of dancers in a round (handles any custom round name like "Top 25")
+const getRoundSize = (roundName) => {
+  if (ROUND_LIMIT[roundName] !== undefined) return ROUND_LIMIT[roundName];
+  const m = roundName.match(/top\s*(\d+)/i);
   if (m) return parseInt(m[1]);
-  return 2; // fallback
+  if (roundName === "Finals") return 2;
+  return 2;
 };
-
-// Legacy compat — kept so existing references don't break
-const ROUND_LIMIT = new Proxy({}, {
-  get: (_, key) => getRoundLimit(key),
-});
 
 const SUGGESTED_CATEGORIES = [
   "HipHop","Breaking","Popping","Locking","Waacking",
@@ -163,9 +157,8 @@ const getKnockoutRounds = (eventRounds) =>
 // Given prelim-ranked list, build the battles for the FIRST knockout round.
 // match_index 0 = Seed1 vs SeedN, index 1 = Seed2 vs Seed(N-1), …
 // If pool is ODD: the middle battle becomes a 3-way (p1, p2, p3).
-const buildBattlesFromSeeds = (seededList, roundName, advanceOverride) => {
-  // advanceOverride: organizer-confirmed count (stored in DB); fallback to getRoundLimit
-  const limit = advanceOverride ?? getRoundLimit(roundName) ?? 2;
+const buildBattlesFromSeeds = (seededList, roundName) => {
+  const limit = getRoundSize(roundName);
   const pool  = seededList.slice(0, limit);
   const n     = pool.length;
   if (n < 2) return [];
@@ -224,23 +217,21 @@ const getWinnersOfRound = (roundName, allDecisions, participantMap) => {
 // Build the battles for any round, accounting for progressive seeding.
 // For the first knockout round → seed from prelim ranking.
 // For subsequent rounds → seed from winners of the previous round.
-const buildRoundBattles = (roundName, eventRounds, prelimRanked, allDecisions, participantMap, advanceOverride) => {
+const buildRoundBattles = (roundName, eventRounds, prelimRanked, allDecisions, participantMap) => {
   const knockoutRounds = getKnockoutRounds(eventRounds);
   const roundIndex = knockoutRounds.indexOf(roundName);
   if (roundIndex < 0) return [];
 
   let seededList;
   if (roundIndex === 0) {
-    // First knockout round — seed from prelim ranking
-    // Only apply advanceOverride on the first round (subsequent rounds seed from winners)
     seededList = prelimRanked;
-    return buildBattlesFromSeeds(seededList, roundName, advanceOverride);
   } else {
-    // Subsequent rounds — seed from winners of the previous round
     const prevRound = knockoutRounds[roundIndex - 1];
     seededList = getWinnersOfRound(prevRound, allDecisions, participantMap);
-    return buildBattlesFromSeeds(seededList, roundName);
   }
+  // Use getRoundSize for flexible round sizes
+  const limit = getRoundSize(roundName);
+  return buildBattlesFromSeeds(seededList.slice(0, limit), roundName);
 };
 
 // ─────────────────────────────────────────────────────────────────
@@ -942,42 +933,33 @@ function OrgLoginScreen({ onBack, onLogin, showToast }) {
 // VIEWER LOGIN
 // ─────────────────────────────────────────────────────────────────
 function AttendeeLoginScreen({ onBack, onLogin, showToast }) {
-  const [viewerCode,setViewerCode]=useState("");
-  const [name,setName]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [event,setEvent]=useState(null);
+  const [viewerCode,setViewerCode]=useState(""); const [name,setName]=useState(""); const [loading,setLoading]=useState(false);
 
-  const lookupEvent=async()=>{
+  const handleJoin=async()=>{
     if(!viewerCode.trim())return showToast("Enter the event code!","error");
     if(!name.trim())return showToast("Enter your name!","error");
     setLoading(true);
     const{data,error}=await supabase.from("events").select("*").eq("viewer_code",viewerCode.trim().toUpperCase()).single();
     if(error||!data){showToast("Invalid event code!","error");setLoading(false);return;}
-    // Register and enter in one step
-    let{error:insErr}=await supabase.from("attendees").insert({event_id:data.id,name:name.trim(),role:"attendee",category:null});
-    if(insErr&&insErr.message&&insErr.message.toLowerCase().includes("category"))
-      ({error:insErr}=await supabase.from("attendees").insert({event_id:data.id,name:name.trim(),role:"attendee"}));
-    // ignore duplicate errors — just let them in
-    showToast("Welcome, "+name.trim()+"! Loading live view...");
-    onLogin({event:data,name:name.trim(),role:"attendee"});
-    setLoading(false);
+    showToast(`Welcome, ${name.trim()}! Loading live view…`);
+    onLogin({event:data,name:name.trim(),role:"attendee"});setLoading(false);
   };
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,background:"linear-gradient(160deg,#0a0612,#0d0a22,#0a0e1a)"}}>
       <div style={{width:"100%",maxWidth:400}}>
         <button className="btn" style={{background:"transparent",color:"#7755aa",border:"none",padding:0,marginBottom:24,fontSize:12,letterSpacing:2}} onClick={onBack}>← BACK</button>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 LIVE VIEW</div>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:28}}>Enter your name and the event code to watch live.</div>
+        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,letterSpacing:3,marginBottom:4}}>🎟 ATTENDEE LIVE VIEW</div>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:28}}>Enter the event code and your name to follow the event live.</div>
         <div style={{marginBottom:14}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME</div>
-          <input className="inp" placeholder="Your name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&lookupEvent()}/>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>EVENT CODE</div>
+          <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={viewerCode} onChange={e=>setViewerCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleJoin()} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
         </div>
         <div style={{marginBottom:20}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>EVENT CODE</div>
-          <input className="inp" placeholder="e.g. VIEW-ABCD-1234" value={viewerCode} onChange={e=>setViewerCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&lookupEvent()} style={{letterSpacing:2,fontFamily:"Bebas Neue,sans-serif",fontSize:18}}/>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:6}}>YOUR NAME</div>
+          <input className="inp" placeholder="Your name" value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleJoin()}/>
         </div>
-        <button className="btn" style={{background:"linear-gradient(135deg,#00e5ff,#3b82f6)",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={lookupEvent} disabled={loading}>{loading?<Spinner/>:"WATCH LIVE →"}</button>
+        <button className="btn" style={{background:"linear-gradient(135deg,#00e5ff,#3b82f6)",color:"#000",width:"100%",fontSize:14,padding:"13px"}} onClick={handleJoin} disabled={loading}>{loading?<Spinner/>:"WATCH LIVE →"}</button>
       </div>
     </div>
   );
@@ -1042,7 +1024,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   const col        = getCatColor(categories, myCategory);
 
   const [tab,setTab]               = useState("scoring");
-  const [rounds, setRounds]        = useState(event.rounds||["Prelims","Finals"]);
+  // rounds fetched live from DB so organizer round updates are reflected immediately
+  const [rounds,setRounds]         = useState(event.rounds||["Prelims"]);
   const [currentRound,setCurrentRound] = useState((event.rounds||["Prelims"])[0]||"Prelims");
   const [scoreInputs,setScoreInputs]   = useState({});
   const [participants,setParticipants] = useState([]);
@@ -1063,8 +1046,6 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
       supabase.from("battle_decisions").select("*").eq("event_id",event.id).eq("category",myCategory),
       supabase.from("events").select("rounds").eq("id",event.id).single(),
     ]);
-    // Update rounds from DB so organizer's round setup is always current
-    if(evRes.data?.rounds) setRounds(evRes.data.rounds);
     // Load scores with category filter; fall back to event-only if category column is missing
     let sRes = await supabase.from("scores").select("*").eq("event_id",event.id).eq("category",myCategory);
     if(sRes.error && sRes.error.message && sRes.error.message.toLowerCase().includes("category")){
@@ -1074,26 +1055,21 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
     if(sRes.data) setScores(sRes.data);
     if(jcRes.data) setJudgeCodes(jcRes.data);
     if(bRes.data) setBattles(bRes.data);
+    if(evRes.data?.rounds) {
+      setRounds(evRes.data.rounds);
+      // If currently on Prelims but knockout rounds now exist, stay on Prelims
+      // but don't override if judge has already switched rounds
+      setCurrentRound(prev => {
+        // If the previously selected round is still valid, keep it
+        if (evRes.data.rounds.includes(prev)) return prev;
+        // Otherwise fall back to first round
+        return evRes.data.rounds[0]||"Prelims";
+      });
+    }
     setLoading(false);
   };
 
-  const [liveRounds, setLiveRounds] = useState(event.rounds||["Prelims","Finals"]);
-  const [advanceCount, setAdvanceCount] = useState(event.advance_count||null);
-  const rounds = liveRounds;
-
   useEffect(()=>{ loadAll(); },[event.id,myCategory]);
-
-  // Subscribe to event row changes so rounds + advance_count update live
-  useEffect(()=>{
-    // Also fetch current advance_count from DB on mount
-    supabase.from("events").select("rounds,advance_count").eq("id",event.id).single()
-      .then(({data})=>{ if(data?.rounds) setLiveRounds(data.rounds); if(data?.advance_count) setAdvanceCount(data.advance_count); });
-    const evCh=supabase.channel(`ev-rounds-${event.id}`)
-      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"events",filter:`id=eq.${event.id}`},
-        (p)=>{ if(p.new?.rounds) setLiveRounds(p.new.rounds); if(p.new?.advance_count!=null) setAdvanceCount(p.new.advance_count); })
-      .subscribe();
-    return()=>supabase.removeChannel(evCh);
-  },[event.id]);
 
   useEffect(()=>{
     const pCh=supabase.channel(`jp-${event.id}-${myCategory}`)
@@ -1108,7 +1084,21 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
       .on("postgres_changes",{event:"INSERT",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>{if(p.new.category===myCategory)setBattles(prev=>[...prev,p.new]);})
       .on("postgres_changes",{event:"UPDATE",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>setBattles(prev=>prev.map(b=>b.id===p.new.id?p.new:b)))
       .subscribe();
-    return ()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);};
+    // Subscribe to event round updates — organizer may add knockout rounds after judge logs in
+    const evCh=supabase.channel(`jev-${event.id}`)
+      .on("postgres_changes",{event:"UPDATE",schema:"public",table:"events",filter:`id=eq.${event.id}`},(p)=>{
+        if(p.new.rounds){
+          setRounds(p.new.rounds);
+          // Auto-switch away from Prelims if organizer has moved to a knockout round
+          // (only if judge is still on Prelims and knockout rounds now exist)
+          setCurrentRound(prev=>{
+            if(p.new.rounds.includes(prev))return prev;
+            return p.new.rounds[0]||"Prelims";
+          });
+        }
+      })
+      .subscribe();
+    return ()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);supabase.removeChannel(evCh);};
   },[event.id,myCategory]);
 
   // Derived
@@ -1146,8 +1136,8 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
   // Build current round's battles using progressive seeding
   const currentBattles = useMemo(()=>{
     if(isPrelim) return [];
-    return buildRoundBattles(currentRound, rounds, prelimRanked, battles, participantMap, advanceCount);
-  },[isPrelim, currentRound, rounds, prelimRanked, battles, participantMap, advanceCount]);
+    return buildRoundBattles(currentRound, rounds, prelimRanked, battles, participantMap);
+  },[isPrelim, currentRound, rounds, prelimRanked, battles, participantMap]);
 
   // Get my existing decision for a battle at the current active tie_round
   const getBattleDecisions = (mi) => battles.filter(b=>b.round===currentRound&&b.match_index===mi);
@@ -1210,12 +1200,19 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            {rounds.length>0?(
-              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-                {rounds.map(r=><option key={r}>{r}</option>)}
-              </select>
+            {rounds.length>1?(
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:13,fontFamily:"Bebas Neue,sans-serif",letterSpacing:2,color:isPrelim?"#ffd700":col.primary,borderColor:isPrelim?"#ffd70044":col.border}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
+                  {rounds.map(r=><option key={r} value={r}>{r}</option>)}
+                </select>
+                {!isPrelim&&(
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:col.primary,letterSpacing:1,textAlign:"center"}}>🥊 KNOCKOUT MODE</div>
+                )}
+              </div>
             ):(
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",padding:"7px 12px",background:"#120e22",borderRadius:8,border:"1px solid #2a1840"}}>Knockout not started yet</div>
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",padding:"7px 12px",background:"#120e22",borderRadius:8,border:"1px solid #2a1840"}}>
+                Prelims only — knockout rounds not set yet
+              </div>
             )}
             <button className="btn" style={{background:"#1c1232",color:"#c084fc",border:"1px solid #7c3aed44",fontSize:11}} onClick={()=>loadAll()}>🔄</button>
             <button className="btn" style={{background:showNotifHistory?"#ff980022":"transparent",color:"#ff9800",border:"1px solid #ff980033",fontSize:11,position:"relative"}} onClick={()=>setShowNotifHistory(p=>!p)}>
@@ -1228,7 +1225,11 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
           <div style={{marginBottom:16}}><NotificationHistoryPanel history={notifHistory} isHost={false}/></div>
         )}
         <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",overflowX:"auto"}}>
-          {[{key:"scoring",label:isPrelim?"PRELIM SCORING":"BATTLE JUDGING"},{key:"leaderboard",label:"LEADERBOARD"}].map(t=>(
+          {[
+            {key:"scoring",label:isPrelim?"PRELIM SCORING":"BATTLE JUDGING"},
+            {key:"bracket",label:"BRACKET VIEW"},
+            {key:"leaderboard",label:"PRELIM RANKINGS"},
+          ].map(t=>(
             <button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#7755aa",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>
           ))}
         </div>
@@ -1236,7 +1237,51 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
 
       <div style={{padding:"20px 22px 40px",maxWidth:900,margin:"0 auto"}}>
 
-        {/* ── PRELIM SCORING ── */}
+        {/* ── WINNER TROPHY (shown for judges when finals are decided) ── */}
+        {(()=>{
+          const allRoundsJ=event.rounds||["Prelims"];
+          const koJ=allRoundsJ.filter(r=>r!=="Prelims");
+          const finalsJ=koJ[koJ.length-1];
+          if(!finalsJ)return null;
+          const decsJ=battles.filter(b=>b.category===myCategory&&b.round===finalsJ);
+          if(!decsJ.length)return null;
+          const miJ=[...new Set(decsJ.map(d=>d.match_index))][0];
+          const resJ=resolveBattle(decsJ.filter(d=>d.match_index===miJ));
+          if(resJ.status!=="decided")return null;
+          const allPartsJ=participants;
+          const pMapJ={};allPartsJ.forEach(p=>{pMapJ[p.id]=p;});
+          const champJ=pMapJ[resJ.winner_id];
+          const dJ=decsJ.filter(d=>d.match_index===miJ);
+          const runnerUpIdJ=dJ[0]?.p1_id===resJ.winner_id?dJ[0]?.p2_id:dJ[0]?.p1_id;
+          const runnerUpJ=pMapJ[runnerUpIdJ];
+          if(!champJ)return null;
+          const cJ=col;
+          return (
+            <div style={{marginBottom:20}}>
+              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,letterSpacing:6,color:"#ffd700",marginBottom:12,textAlign:"center"}}>🏆 FINAL RESULTS · {myCategory}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div style={{background:"linear-gradient(135deg,#1a1200,#0f0a00)",border:`2px solid ${cJ.primary}`,borderRadius:16,padding:"24px 16px",textAlign:"center",position:"relative"}}>
+                  <div style={{position:"absolute",top:-1,left:"50%",transform:"translateX(-50%)"}}>
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:8,letterSpacing:3,color:"#000",background:cJ.primary,padding:"3px 12px",borderRadius:"0 0 8px 8px",fontWeight:700}}>CHAMPION</span>
+                  </div>
+                  <div style={{fontSize:36,marginBottom:4,marginTop:8}}>🏆</div>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:cJ.primary,lineHeight:1,marginBottom:4}}>{champJ.name}</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>{champJ.city}</div>
+                </div>
+                {runnerUpJ&&(
+                  <div style={{background:"linear-gradient(135deg,#141414,#0a0a0a)",border:"2px solid #aaa8",borderRadius:16,padding:"24px 16px",textAlign:"center",position:"relative"}}>
+                    <div style={{position:"absolute",top:-1,left:"50%",transform:"translateX(-50%)"}}>
+                      <span style={{fontFamily:"Barlow,sans-serif",fontSize:8,letterSpacing:3,color:"#000",background:"#bbb",padding:"3px 12px",borderRadius:"0 0 8px 8px",fontWeight:700}}>RUNNER-UP</span>
+                    </div>
+                    <div style={{fontSize:36,marginBottom:4,marginTop:8}}>🥈</div>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:"#ccc",lineHeight:1,marginBottom:4}}>{runnerUpJ.name}</div>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>{runnerUpJ.city}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         {tab==="scoring"&&isPrelim&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIMS · {myCategory} · SCORE EACH DANCER</div>
@@ -1246,6 +1291,23 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
             <div style={{background:"#1a1a0a",border:"1px solid #ffd70033",borderRadius:8,padding:"8px 14px",marginBottom:18,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>
               ⚡ Total score from all judges in this category determines prelim ranking and knockout seeding.
             </div>
+            {/* Show banner when knockout rounds have been configured by organizer */}
+            {rounds.filter(r=>r!=="Prelims").length>0&&(
+              <div style={{background:"#0a1a0a",border:"1px solid #00c85344",borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div className="pulse" style={{width:8,height:8,borderRadius:"50%",background:"#00c853",flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:"#00c853",letterSpacing:2}}>KNOCKOUT ROUNDS READY</div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>
+                    {rounds.filter(r=>r!=="Prelims").join(" → ")} — use the round selector above to switch to battle judging
+                  </div>
+                </div>
+                {rounds.filter(r=>r!=="Prelims").map(r=>(
+                  <button key={r} className="btn" style={{background:col.primary,color:"#000",fontSize:11,padding:"6px 14px"}} onClick={()=>setCurrentRound(r)}>
+                    → {r}
+                  </button>
+                ))}
+              </div>
+            )}
             {checkedIn.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No checked-in participants yet</div>}
             {checkedIn.map(p=>{
               const myScore=getMyScore(p.id);
@@ -1379,25 +1441,64 @@ function JudgeDashboard({ judgeCode, event, onBack, showToast }) {
           </div>
         )}
 
-        {/* ── LEADERBOARD ── */}
+        {/* ── BRACKET VIEW TAB ── */}
+        {tab==="bracket"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>BRACKET VIEW · {myCategory}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:16}}>All knockout rounds for your category — see the full bracket flow live.</div>
+            {rounds.filter(r=>r!=="Prelims").length===0?(
+              <div style={{background:"#110d22",border:"1px solid #2a1f4a",borderRadius:12,padding:"32px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No knockout rounds configured yet. Waiting for organizer.</div>
+            ):(
+              <div style={{display:"flex",gap:20,overflowX:"auto",paddingBottom:20}}>
+                {rounds.filter(r=>r!=="Prelims").map(roundName=>{
+                  const roundBattles=buildRoundBattles(roundName,rounds,prelimRanked,battles,participantMap);
+                  return (
+                    <div key={roundName} style={{display:"flex",flexDirection:"column",gap:12,minWidth:200}}>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:roundName===currentRound?col.primary:"#55449a",textAlign:"center",marginBottom:4,borderBottom:`2px solid ${roundName===currentRound?col.primary:"#1a1030"}`,paddingBottom:6}}>
+                        {roundName}{roundName===currentRound&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:col.primary,marginLeft:6}}>← NOW</span>}
+                      </div>
+                      {roundBattles.length===0?(
+                        <div style={{fontFamily:"Barlow,sans-serif",color:"#3d2080",fontSize:10,textAlign:"center",padding:"16px 0"}}>Waiting…</div>
+                      ):roundBattles.map(battle=>{
+                        const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                        const is3way=!!battle.p3;
+                        const decs=battles.filter(b=>b.round===roundName&&b.match_index===battle.match_index);
+                        const result=resolveBattle(decs);
+                        const isDecided=result.status==="decided";
+                        const isTied=result.status==="tied";
+                        const myDecInBattle=decs.find(d=>d.judge_key===myKey);
+                        return (
+                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
+                            {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY</div>}
+                            {fighters.map((p,fi)=>{
+                              const isWinner=isDecided&&result.winner_id===p.id;
+                              const isLoser=isDecided&&result.winner_id!==p.id;
+                              const myVote=myDecInBattle&&!myDecInBattle.is_tie&&myDecInBattle.winner_id===p.id;
+                              return (
+                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                                  <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div></div>
+                                  {myVote&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:8,color:col.primary,letterSpacing:1}}>MY PICK</span>}
+                                  {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:9,color:col.primary}}>🏆</span>}
+                                </div>
+                              );
+                            })}
+                            <div style={{padding:"4px 12px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:isTied?"#ffd700":isDecided?"#00c853":"#55449a"}}>
+                              {isTied?`🤝 TIE ×${result.tie_round+1}`:isDecided?`🏆 ${result.winner_name}`:"Pending…"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PRELIM RANKINGS TAB ── */}
         {tab==="leaderboard"&&(
           <div className="slide">
-            {/* Show winner dashboard if finals are decided */}
-            {(()=>{
-              const allKo=(allRounds||[]).filter(r=>r!=="Prelims");
-              const finR=allKo[allKo.length-1];
-              if(finR){
-                const finDecs=battles.filter(b=>b.round===finR);
-                if(finDecs.length>0){
-                  const mi=[...new Set(finDecs.map(d=>d.match_index))][0];
-                  const res=resolveBattle(finDecs.filter(d=>d.match_index===mi));
-                  if(res.status==="decided"){
-                    return <WinnerDashboard event={event} categories={[myCategory]} participants={Object.values(participantMap)} battles={battles} allRounds={allRounds}/>;
-                  }
-                }
-              }
-              return null;
-            })()}
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>
               {isPrelim?"PRELIM RANKINGS · LIVE":"CURRENT ROUND MATCHUPS"} · {myCategory}
             </div>
@@ -1772,7 +1873,7 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
   // Attendees see knockout rounds in selector; prelims shown as leaderboard when no knockout active
   const rounds     = allRounds.filter(r=>r!=="Prelims");
   const [activeCat,setActiveCat]=useState(categories[0]||"");
-  const [currentRound,setCurrentRound]=useState(rounds[0]||"");
+  const [currentRound,setCurrentRound]=useState("Prelims");
   const col=getCatColor(categories,activeCat);
   const isPrelim=false; // attendees never see prelims scoring — only total leaderboard
 
@@ -1814,7 +1915,9 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
     return a.name.localeCompare(b.name);
   });
   const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
-  const currentBattles=currentRound?buildRoundBattles(currentRound, allRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap):[];
+  // rounds now includes all (Prelims + knockout) for selector
+  const allSelectableRounds = allRounds;
+  const currentBattles=currentRound&&currentRound!=="Prelims"?buildRoundBattles(currentRound, allRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap):[];
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
 
@@ -1833,7 +1936,7 @@ function AttendeeDashboard({ event, attendeeName, onBack }) {
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-              <option value="">📊 Prelim Rankings</option>
+              <option value="Prelims">📊 Prelim Rankings</option>
               {rounds.map(r=><option key={r}>{r}</option>)}
             </select>
             <button className="btn" style={{background:"#1c1232",color:"#c084fc",border:"1px solid #7c3aed44",fontSize:11}} onClick={()=>{setLoading(true);Promise.all([supabase.from("participants").select("*").eq("event_id",event.id),supabase.from("scores").select("*").eq("event_id",event.id),supabase.from("battle_decisions").select("*").eq("event_id",event.id)]).then(([p,s,b])=>{if(p.data)setParticipants(p.data);if(s.data)setScores(s.data);if(b.data)setBattles(b.data);setLoading(false);})}}>🔄</button>
@@ -1983,22 +2086,22 @@ function EmceeLoginScreen({ onBack, onLogin, showToast }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// EMCEE DASHBOARD — tabbed view mirroring organizer (read-only)
+// EMCEE DASHBOARD
+// Full read-only view with tabs: host info, round setup view, scores,
+// bracket, leaderboard, announcements. Plus last call section.
 // ─────────────────────────────────────────────────────────────────
 function EmceeDashboard({ event, emceeName, onBack }) {
   const categories   = event.categories||[];
-  const [eventRounds,setEventRounds] = useState(event.rounds||["Prelims","Finals"]);
-  const rounds = eventRounds;
-  const [activeCat,setActiveCat]       = useState(categories[0]||"");
-  const [currentRound,setCurrentRound] = useState((event.rounds||["Prelims"])[0]||"Prelims");
-  const [tab,setTab]                   = useState("live");
+  const [activeCat,setActiveCat]     = useState(categories[0]||"");
+  const [tab,setTab]                 = useState("prelims");
   const col          = getCatColor(categories,activeCat);
-  const isPrelim     = currentRound==="Prelims";
   const { popup: liveNotif, history: notifHistory, dismissPopup } = useLiveNotifications(event.id, "emcee");
+  const [showNotifHistory, setShowNotifHistory] = useState(false);
 
   const [participants,setParticipants] = useState([]);
   const [scores,setScores]             = useState([]);
   const [battles,setBattles]           = useState([]);
+  const [eventRounds,setEventRounds]   = useState(event.rounds||["Prelims"]);
   const [loading,setLoading]           = useState(true);
 
   const loadEmcee=useCallback(async()=>{
@@ -2007,12 +2110,12 @@ function EmceeDashboard({ event, emceeName, onBack }) {
       supabase.from("participants").select("*").eq("event_id",event.id),
       supabase.from("scores").select("*").eq("event_id",event.id),
       supabase.from("battle_decisions").select("*").eq("event_id",event.id),
-      supabase.from("events").select("rounds,advance_count").eq("id",event.id).single(),
+      supabase.from("events").select("rounds").eq("id",event.id).single(),
     ]);
     if(pRes.data)setParticipants(pRes.data);
     if(sRes.data)setScores(sRes.data);
     if(bRes.data)setBattles(bRes.data);
-    if(evRes.data?.rounds)setEventRounds(evRes.data.rounds);
+    if(evRes.data)setEventRounds(evRes.data.rounds||["Prelims"]);
     setLoading(false);
   },[event.id]);
 
@@ -2021,231 +2124,188 @@ function EmceeDashboard({ event, emceeName, onBack }) {
     const pCh=supabase.channel(`ep-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"participants",filter:`event_id=eq.${event.id}`},(p)=>setParticipants(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"participants",filter:`event_id=eq.${event.id}`},(p)=>setParticipants(prev=>prev.map(x=>x.id===p.new.id?p.new:x))).subscribe();
     const sCh=supabase.channel(`es-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"scores",filter:`event_id=eq.${event.id}`},(p)=>setScores(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"scores",filter:`event_id=eq.${event.id}`},(p)=>setScores(prev=>prev.map(s=>s.id===p.new.id?p.new:s))).subscribe();
     const bCh=supabase.channel(`eb-${event.id}`).on("postgres_changes",{event:"INSERT",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>setBattles(prev=>[...prev,p.new])).on("postgres_changes",{event:"UPDATE",schema:"public",table:"battle_decisions",filter:`event_id=eq.${event.id}`},(p)=>setBattles(prev=>prev.map(b=>b.id===p.new.id?p.new:b))).subscribe();
-    const evCh=supabase.channel(`eev-${event.id}`).on("postgres_changes",{event:"UPDATE",schema:"public",table:"events",filter:`id=eq.${event.id}`},(p)=>{if(p.new?.rounds)setEventRounds(p.new.rounds);}).subscribe();
+    const evCh=supabase.channel(`ev-emcee-${event.id}`).on("postgres_changes",{event:"UPDATE",schema:"public",table:"events",filter:`id=eq.${event.id}`},(p)=>{if(p.new.rounds)setEventRounds(p.new.rounds);}).subscribe();
     return()=>{supabase.removeChannel(pCh);supabase.removeChannel(sCh);supabase.removeChannel(bCh);supabase.removeChannel(evCh);};
   },[event.id]);
 
-  const scoreMap=useMemo(()=>{const m={};scores.forEach(s=>{if(!m[s.participant_id])m[s.participant_id]={};m[s.participant_id][s.judge_key]=s.score;});return m;},[scores]);
-  const getScore=useCallback((pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;},[scoreMap]);
-  const catParts     = useMemo(()=>participants.filter(p=>p.category===activeCat),[participants,activeCat]);
-  const checkedIn    = useMemo(()=>catParts.filter(p=>p.checked_in),[catParts]);
-  const catSorted    = useMemo(()=>[...catParts].sort((a,b)=>getScore(b.id)-getScore(a.id)),[catParts,getScore]);
-  const prelimRanked = useMemo(()=>[...checkedIn].sort((a,b)=>{
+  const scoreMap={};
+  scores.forEach(s=>{if(!scoreMap[s.participant_id])scoreMap[s.participant_id]={};scoreMap[s.participant_id][s.judge_key]=s.score;});
+  const getScore=(pid)=>{const vals=Object.values(scoreMap[pid]||{});return vals.length?vals.reduce((a,b)=>a+b,0):0;};
+  const catParts     = participants.filter(p=>p.category===activeCat);
+  const checkedIn    = catParts.filter(p=>p.checked_in);
+  const prelimRanked = [...checkedIn].sort((a,b)=>{
     const sa=getScore(a.id),sb=getScore(b.id);
     if(sb!==sa)return sb-sa;
     const aMax=Math.max(0,...Object.values(scoreMap[a.id]||{}));
     const bMax=Math.max(0,...Object.values(scoreMap[b.id]||{}));
     if(bMax!==aMax)return bMax-aMax;
     return a.name.localeCompare(b.name);
-  }),[checkedIn,getScore,scoreMap]);
-  const participantMap=useMemo(()=>{const m={};participants.forEach(p=>{m[p.id]=p;});return m;},[participants]);
-  const currentBattles=useMemo(()=>isPrelim?[]:buildRoundBattles(currentRound,rounds,prelimRanked,battles.filter(b=>b.category===activeCat),participantMap),[isPrelim,currentRound,rounds,prelimRanked,battles,activeCat,participantMap]);
+  });
+  const participantMap={};participants.forEach(p=>{participantMap[p.id]=p;});
+  const knockoutRounds = (eventRounds||[]).filter(r=>r!=="Prelims");
 
-  if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
+  // Last call: participants not checked in
+  const notCheckedIn = catParts.filter(p=>!p.checked_in&&!p.disqualified);
 
-  // Check if finals decided for any category → show winner dashboard
-  const koRounds=rounds.filter(r=>r!=="Prelims");
-  const finalsRound=koRounds[koRounds.length-1];
-  const finalsDecided=finalsRound&&categories.some(cat=>{
-    const decs=battles.filter(b=>b.category===cat&&b.round===finalsRound);
+  // Finals winner detection
+  const finalsRound = knockoutRounds[knockoutRounds.length-1];
+  const finalsDecided = finalsRound && (()=>{
+    const decs=battles.filter(b=>b.category===activeCat&&b.round===finalsRound);
     if(!decs.length)return false;
     const mi=[...new Set(decs.map(d=>d.match_index))][0];
     return resolveBattle(decs.filter(d=>d.match_index===mi)).status==="decided";
-  });
+  })();
+
+  if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0a0612"}}><Spinner/></div>;
+
+  const TABS = [
+    {key:"prelims",label:"PRELIM SCORES"},
+    {key:"leaderboard",label:"LEADERBOARD"},
+    {key:"bracket",label:"BRACKET"},
+    {key:"roundsetup",label:"ROUND SETUP"},
+    {key:"lastcall",label:"📣 LAST CALL"},
+    {key:"announcements",label:`🔔 ANNOUNCEMENTS${notifHistory.length>0?" ("+notifHistory.length+")":""}`},
+  ];
 
   return (
     <div className="hiphop-bg" style={{fontFamily:"'Bebas Neue',Impact,sans-serif",background:"linear-gradient(160deg,#0a0612 0%,#0d0a22 60%,#0a0e1a 100%)",minHeight:"100vh",color:"#fff"}}>
       <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
-      <div style={{padding:"22px 22px 0",maxWidth:1100,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
+      <div style={{padding:"22px 22px 0",maxWidth:1000,margin:"0 auto",marginTop:liveNotif?"60px":0}}>
 
         {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:12}}>
           <div>
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:48,letterSpacing:5,lineHeight:1}}>{event.name}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>{event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}</div>
-            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:col.primary,letterSpacing:3,marginTop:2}}>
+              {event.city} · {event.start_date||event.date}{event.end_date&&event.end_date!==event.start_date?" → "+event.end_date:""}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
               <div className="pulse" style={{width:7,height:7,borderRadius:"50%",background:"#ff9800"}}/>
               <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ff9800",letterSpacing:2}}>🎤 EMCEE · {emceeName}</span>
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            {rounds.length>0&&(
-              <select className="inp" style={{width:"auto",padding:"7px 32px 7px 11px",fontSize:12}} value={currentRound} onChange={e=>setCurrentRound(e.target.value)}>
-                {rounds.map(r=><option key={r}>{r}</option>)}
-              </select>
-            )}
             <button className="btn" style={{background:"#1c1232",color:"#c084fc",border:"1px solid #7c3aed44",fontSize:11}} onClick={loadEmcee}>🔄 REFRESH</button>
             <button className="btn" style={{background:"transparent",color:"#7755aa",border:"1px solid #2a1840",fontSize:11}} onClick={onBack}>← EXIT</button>
           </div>
         </div>
 
-        {/* Stats */}
-        <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
-          {[{label:"PARTICIPANTS",val:participants.length,color:"#fff"},{label:"CHECKED IN",val:participants.filter(p=>p.checked_in).length,color:"#00c853"},{label:"CATEGORIES",val:categories.length,color:col.primary},{label:"BATTLES",val:battles.length,color:"#ff9800"}].map(s=>(
-            <div key={s.label} style={{background:"#110d22",border:"1px solid #181818",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:s.color,lineHeight:1}}>{s.val}</div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#55449a",letterSpacing:2,marginTop:2}}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-
         {/* Category tabs */}
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
           {categories.map(cat=>{const c=getCatColor(categories,cat);const cnt=participants.filter(p=>p.category===cat&&p.checked_in).length;const active=activeCat===cat;return <button key={cat} className="btn" style={{fontSize:11,padding:"7px 14px",background:active?c.primary:"#120e22",color:active?"#000":"#7755aa",border:`1px solid ${active?c.primary:"#2a1840"}`}} onClick={()=>setActiveCat(cat)}>{cat} <span style={{opacity:.7}}>({cnt})</span></button>;})}
         </div>
 
-        {/* Nav tabs */}
-        <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",marginTop:12,overflowX:"auto"}}>
-          {[
-            {key:"live",label:"🎤 LIVE VIEW"},
-            {key:"host",label:"⚡ HOST"},
-            {key:"roundsetup",label:"🔧 ROUND SETUP"},
-            {key:"scores",label:"SCORES"},
-            {key:"bracket",label:"BRACKET"},
-            {key:"leaderboard",label:"LEADERBOARD"},
-            {key:"notifications",label:`📢 ANNOUNCEMENTS${notifHistory.length>0?" ("+notifHistory.length+")":""}`},
-          ].map(t=><button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#7755aa",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>)}
+        {/* Main tabs */}
+        <div style={{display:"flex",borderBottom:"1px solid #1a1a1a",overflowX:"auto"}}>
+          {TABS.map(t=>(
+            <button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#7755aa",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>
+          ))}
         </div>
       </div>
 
-      <div style={{padding:"20px 22px 40px",maxWidth:1100,margin:"0 auto"}}>
-        {/* Category banner */}
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"9px 14px",background:col.bg,border:`1px solid ${col.border}`,borderRadius:9}}>
-          <div style={{width:8,height:8,borderRadius:"50%",background:col.primary}}/>
-          <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:col.primary}}>{activeCat}</span>
-          <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginLeft:4}}>{catParts.length} participants</span>
-          <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:currentRound==="Prelims"?"#ffd700":"#00e5ff",marginLeft:8}}>{currentRound==="Prelims"?"PRELIMS":"KNOCKOUT"}</span>
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
-            <div className="pulse" style={{width:5,height:5,borderRadius:"50%",background:"#00c853"}}/>
-            <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2}}>LIVE</span>
-          </div>
-        </div>
+      <div style={{padding:"20px 22px 40px",maxWidth:1000,margin:"0 auto"}}>
 
-        {/* ── LIVE VIEW TAB ── */}
-        {tab==="live"&&(()=>{
-          if(finalsDecided){
-            return <WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={rounds}/>;
-          }
-          return (
-            <div className="slide">
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:3,color:col.primary,marginBottom:14}}>{currentRound} · {activeCat}</div>
-              {isPrelim?(
+        {/* ── WINNER DASHBOARD ── */}
+        {finalsDecided&&<WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={eventRounds}/>}
+
+        {/* ── PRELIM SCORES TAB ── */}
+        {tab==="prelims"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIM SCORES · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>Live prelim rankings — sorted high to low by total score.</div>
+            {(()=>{
+              // Check if knockout is active
+              if(knockoutRounds.length>0){
+                const activeKO = knockoutRounds.find(r=>{
+                  const decs=battles.filter(b=>b.category===activeCat&&b.round===r);
+                  return decs.length>0;
+                });
+                if(activeKO){
+                  // Show current knockout round battles
+                  const seedList = (()=>{
+                    const ko=knockoutRounds;
+                    const idx=ko.indexOf(activeKO);
+                    if(idx===0)return prelimRanked;
+                    // get winners of prev round
+                    const prevRound=ko[idx-1];
+                    return getWinnersOfRound(prevRound,battles.filter(b=>b.category===activeCat),participantMap);
+                  })();
+                  const roundBattles=buildBattlesFromSeeds(seedList,activeKO);
+                  return (
+                    <div>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15,letterSpacing:3,color:col.primary,marginBottom:12}}>🔥 {activeKO} — LIVE BATTLES</div>
+                      {roundBattles.map((battle,bi)=>{
+                        const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                        const is3way=!!battle.p3;
+                        const decs=battles.filter(b=>b.round===activeKO&&b.match_index===battle.match_index&&b.category===activeCat);
+                        const result=resolveBattle(decs);
+                        const isDecided=result.status==="decided";
+                        const isTied=result.status==="tied";
+                        return (
+                          <div key={bi} className="battle-card" style={{marginBottom:14}}>
+                            <div style={{padding:"10px 18px",background:"#0b0818",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <span>BATTLE {bi+1}{is3way?" · 3-WAY":""}</span>
+                              <div>
+                                {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
+                                {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700"}}>🤝 TIE × {result.tie_round+1}</span>}
+                                {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa"}}>Judges deciding…</span>}
+                              </div>
+                            </div>
+                            <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
+                              {fighters.map((p,fi)=>{
+                                const isWinner=isDecided&&result.winner_id===p.id;
+                                const isLoser=isDecided&&result.winner_id!==p.id;
+                                return (
+                                  <div key={p.id} style={{padding:"16px 18px",textAlign:"center",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",opacity:isLoser?0.45:1,borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
+                                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
+                                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginTop:3}}>{p.city}</div>
+                                    {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,marginTop:6,letterSpacing:1}}>🏆 WINNER</div>}
+                                  </div>
+                                );
+                              })}
+                              {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#2a1840"}}>VS</div>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+              }
+              // Show prelim scores
+              return (
                 <div>
-                  <div style={{background:"#110d22",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>🎤 Prelims in progress — dancers performing and being scored by judges.</div>
+                  <div style={{background:"#110d22",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
+                    🎤 Prelims in progress — dancers are performing and being scored.
+                  </div>
                   <div style={{background:"#0d0a1a",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
                     {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No scored dancers yet</div>}
                     {prelimRanked.map((p,i)=>(
                       <div key={p.id} className="lrow" style={{background:i===0?"#0a1200":i===1?"#0a1000":i===2?"#0a0e00":"transparent"}}>
                         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#2a1840",minWidth:36}}>#{i+1}</div>
-                        <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
-                        <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d",marginRight:8}}>{p.checked_in?"✓ IN":"PENDING"}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div>
+                          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div>
+                        </div>
                         <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginRight:6}}>SCORE</div>
                         <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#fff",minWidth:40,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
                       </div>
                     ))}
                   </div>
                 </div>
-              ):(
-                <div>
-                  <div style={{background:"#110d22",border:"1px solid #ff980022",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>🎤 {currentRound} battles — announce each battle as judges decide the winner.</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                    {currentBattles.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>Waiting for bracket to be seeded…</div>}
-                    {currentBattles.map((battle)=>{
-                      const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
-                      const is3way=!!battle.p3;
-                      const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
-                      const result=resolveBattle(decs);
-                      const isDecided=result.status==="decided";
-                      const isTied=result.status==="tied";
-                      return (
-                        <div key={battle.match_index} className="battle-card">
-                          <div style={{padding:"10px 18px",background:"#0b0818",fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                            <span>BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}</span>
-                            <div style={{display:"flex",gap:8}}>
-                              {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
-                              {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#e2e8f0",background:"#ffffff15",padding:"2px 8px",borderRadius:6,border:"1px solid #ffffff33"}}>🤝 TIE × {result.tie_round+1}</span>}
-                              {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa"}}>Judges deciding…</span>}
-                            </div>
-                          </div>
-                          <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
-                            {fighters.map((p,fi)=>{
-                              const isWinner=isDecided&&result.winner_id===p.id;
-                              const isLoser=isDecided&&result.winner_id!==p.id;
-                              return (
-                                <div key={p.id} style={{padding:"16px 18px",textAlign:"center",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",opacity:isLoser?0.45:1,borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
-                                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
-                                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginTop:3}}>{p.city}</div>
-                                  {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,color:col.primary,marginTop:6,letterSpacing:1}}>🏆 WINNER</div>}
-                                </div>
-                              );
-                            })}
-                            {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#2a1840"}}>VS</div>}
-                          </div>
-                          {isTied&&<div style={{padding:"8px 18px",background:"#13111a",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",borderTop:"1px solid #2a2000"}}>🔄 Tie — same dancers battle again</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* ── HOST TAB (read-only for emcee — shows bracket flow & results) ── */}
-        {tab==="host"&&(
-          <HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={(msg,type)=>{ const t=document.createElement("div"); t.textContent=msg; t.style.cssText=`position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${type==="error"?"#ff4d4d":"#00c853"};color:#000;padding:10px 22px;border-radius:8px;font-family:Bebas Neue,sans-serif;font-size:14px;letter-spacing:2px;z-index:999`; document.body.appendChild(t); setTimeout(()=>t.remove(),2500); }} readOnly={false}/>
-        )}
-
-        {/* ── ROUND SETUP TAB — Emcee has full write access like organizer ── */}
-        {tab==="roundsetup"&&(
-          <RoundSetupTab col={col} eventRounds={eventRounds} onSave={async(newRounds)=>{
-            const{error}=await supabase.from("events").update({rounds:newRounds}).eq("id",event.id);
-            if(error){alert("Failed to save rounds: "+error.message);return;}
-            setEventRounds(newRounds);
-          }} saving={false} participants={participants} categories={categories} readOnly={false}/>
-        )}
-
-        {/* ── SCORES TAB (view-only) ── */}
-        {tab==="scores"&&(
-          <div className="slide">
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>SCORES (VIEW) · {activeCat}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:8}}>Prelim scores entered by judges. Read-only view.</div>
-            <div style={{background:"#1a1a0a",border:"1px solid #ffd70022",borderRadius:8,padding:"8px 14px",marginBottom:18,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc"}}>⚡ Scores are used for seeding only — they don't carry into knockout rounds.</div>
-            {checkedIn.map(p=>{
-              const sm=scoreMap[p.id]||{};
-              return (
-                <div key={p.id} className="card" style={{marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
-                    <div><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:col.primary}}>{getScore(p.id)||"—"}</div>
-                  </div>
-                  <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                    {Object.entries(sm).map(([key,val])=><div key={key} style={{background:"#1c1232",border:"1px solid #3d2080",borderRadius:6,padding:"5px 9px",textAlign:"center",minWidth:64}}><div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",marginBottom:1}}>{key}</div><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:"#fff"}}>{val}</div></div>)}
-                  </div>
-                </div>
               );
-            })}
-            {checkedIn.length===0&&<div style={{textAlign:"center",padding:"48px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No checked-in participants yet</div>}
+            })()}
           </div>
         )}
-
-        {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} showToast={()=>{}}/>}
 
         {/* ── LEADERBOARD TAB ── */}
         {tab==="leaderboard"&&(
           <div className="slide">
-            {(()=>{
-              if(finalsDecided){
-                return <WinnerDashboard event={event} categories={[activeCat]} participants={participants} battles={battles} allRounds={rounds}/>;
-              }
-              return null;
-            })()}
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIM RANKING · {activeCat}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:4}}>Ranked by total scores from all judges.</div>
-            {catSorted.length>=2&&(
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIM LEADERBOARD · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>All checked-in dancers sorted by total prelim score (high to low).</div>
+            {prelimRanked.length>=2&&(
               <div style={{display:"flex",gap:10,marginBottom:22,flexWrap:"wrap"}}>
-                {[{p:catSorted[1],rank:2,pt:55},{p:catSorted[0],rank:1,pt:85},{p:catSorted[2],rank:3,pt:38}].map(({p,rank,pt})=>p&&(
+                {[{p:prelimRanked[1],rank:2,pt:55},{p:prelimRanked[0],rank:1,pt:85},{p:prelimRanked[2],rank:3,pt:38}].map(({p,rank,pt})=>p&&(
                   <div key={p.id} style={{flex:1,minWidth:120,background:rank===1?col.bg:"#0f0b1e",border:`1px solid ${rank===1?col.border:"#1c1232"}`,borderRadius:12,padding:"14px",paddingTop:pt+"px",textAlign:"center"}}>
                     <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:38,color:rank===1?col.primary:rank===2?"#c0a8e8":"#cd7f32",lineHeight:1}}>#{rank}</div>
                     <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:17,marginBottom:2}}>{p.name}</div>
@@ -2256,133 +2316,198 @@ function EmceeDashboard({ event, emceeName, onBack }) {
               </div>
             )}
             <div style={{background:"#0d0a1a",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
-              {catSorted.map((p,i)=>(
+              {prelimRanked.map((p,i)=>(
                 <div key={p.id} className="lrow">
                   <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#2a1840",minWidth:36}}>#{i+1}</div>
                   <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
                   <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginRight:6}}>TOTAL</div>
                   <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,color:i<3?col.primary:"#fff",minWidth:32,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-                  <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d"}}>{p.checked_in?"✓":"⌛"}</span>
                 </div>
               ))}
-              {catParts.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No participants yet</div>}
+              {prelimRanked.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No scored dancers yet</div>}
             </div>
           </div>
         )}
 
-        {/* ── ANNOUNCEMENTS TAB — Emcee has full send capability ── */}
-        {tab==="notifications"&&(
+        {/* ── BRACKET TAB ── */}
+        {tab==="bracket"&&(
           <div className="slide">
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>📢 ANNOUNCEMENTS · {activeCat}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>Send live announcements to judges, attendees, and organizers.</div>
-            <HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={(msg,type)=>{ const t=document.createElement("div"); t.textContent=msg; t.style.cssText=`position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${type==="error"?"#ff4d4d":"#00c853"};color:#000;padding:10px 22px;border-radius:8px;font-family:Bebas Neue,sans-serif;font-size:14px;letter-spacing:2px;z-index:999`; document.body.appendChild(t); setTimeout(()=>t.remove(),2500); }} readOnly={false} announcementsOnly={true}/>
-            <div style={{marginTop:20}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,color:"#ff9800",marginBottom:8}}>ANNOUNCEMENTS LOG</div>
-              <NotificationHistoryPanel history={notifHistory} isHost={true} eventId={event.id} showToast={()=>{}}/>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>BRACKET · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginBottom:16}}>Full knockout bracket — all rounds from first knockout to finals.</div>
+            {knockoutRounds.length===0?(
+              <div style={{background:"#110d22",border:"1px solid #2a1f4a",borderRadius:12,padding:"32px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>Knockout rounds not configured yet. Waiting for organizer.</div>
+            ):(
+              <div style={{display:"flex",gap:24,overflowX:"auto",paddingBottom:20}}>
+                {knockoutRounds.map(roundName=>{
+                  const roundBattles=buildRoundBattles(roundName,eventRounds,prelimRanked,battles.filter(b=>b.category===activeCat),participantMap);
+                  return (
+                    <div key={roundName} style={{display:"flex",flexDirection:"column",gap:14,minWidth:220}}>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:col.primary,textAlign:"center",marginBottom:4}}>{roundName}</div>
+                      {roundBattles.length===0?(
+                        <div style={{fontFamily:"Barlow,sans-serif",color:"#3d2080",fontSize:11,textAlign:"center",padding:"20px 0"}}>Waiting for previous round…</div>
+                      ):roundBattles.map(battle=>{
+                        const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                        const is3way=!!battle.p3;
+                        const decs=battles.filter(b=>b.round===roundName&&b.match_index===battle.match_index&&b.category===activeCat);
+                        const result=resolveBattle(decs);
+                        const isDecided=result.status==="decided";
+                        const isTied=result.status==="tied";
+                        return (
+                          <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:isTied?"#ffd70044":"#2a1f4a"}`,borderRadius:10,overflow:"hidden"}}>
+                            {is3way&&<div style={{padding:"3px 10px",background:"#1a0f00",fontFamily:"Barlow,sans-serif",fontSize:9,color:"#ff9800"}}>3-WAY BATTLE</div>}
+                            {fighters.map((p,fi)=>{
+                              const isWinner=isDecided&&result.winner_id===p.id;
+                              const isLoser=isDecided&&result.winner_id!==p.id;
+                              return (
+                                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",borderBottom:fi<fighters.length-1?"1px solid #1a1a1a":"none",opacity:isLoser?0.45:1}}>
+                                  <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:isWinner?col.primary:"#fff"}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div></div>
+                                  {isWinner&&<span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:col.primary}}>🏆 WIN</span>}
+                                </div>
+                              );
+                            })}
+                            <div style={{padding:"5px 14px",background:"#0b0818",fontFamily:"Barlow,sans-serif",fontSize:9,color:isTied?"#ffd700":isDecided?"#00c853":"#55449a"}}>
+                              {isTied?`🤝 TIE × ${result.tie_round+1}`:isDecided?`🏆 ${result.winner_name} advances`:"Judges voting…"}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ROUND SETUP VIEW TAB ── */}
+        {tab==="roundsetup"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>ROUND SETUP · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:20}}>Current configured round flow for this event (set by organizer).</div>
+            <div style={{background:"#0a1a0a",border:"1px solid #00c85333",borderRadius:10,padding:"16px 20px",marginBottom:20}}>
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#00c853",letterSpacing:2,marginBottom:8}}>CURRENT FLOW</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                {(eventRounds||[]).map((r,i)=>(
+                  <span key={r} style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,padding:"5px 14px",borderRadius:6,background:r==="Prelims"?"#1a1428":col.bg,border:`1px solid ${r==="Prelims"?"#ffd70033":col.border}`,color:r==="Prelims"?"#ffd700":col.primary}}>{r}</span>
+                    {i<(eventRounds||[]).length-1&&<span style={{color:"#3d2080",fontSize:12}}>→</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div style={{background:"#110d22",border:"1px solid #2a1f4a",borderRadius:10,padding:"14px 18px"}}>
+              <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginBottom:10}}>ROUND STATUS</div>
+              {(eventRounds||[]).map(r=>{
+                if(r==="Prelims")return(
+                  <div key={r} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #1a1030"}}>
+                    <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:"#ffd700",minWidth:80}}>PRELIMS</span>
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa"}}>Score-based · {checkedIn.length} checked in · {checkedIn.filter(p=>getScore(p.id)>0).length} scored</span>
+                  </div>
+                );
+                const decs=battles.filter(b=>b.category===activeCat&&b.round===r);
+                const seedList=buildRoundBattles(r,eventRounds,prelimRanked,battles.filter(b=>b.category===activeCat),participantMap);
+                const allDone=seedList.length>0&&seedList.every(b=>{const bd=decs.filter(d=>d.match_index===b.match_index);return resolveBattle(bd).status==="decided";});
+                const inProgress=!allDone&&decs.length>0;
+                return (
+                  <div key={r} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #1a1030"}}>
+                    <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:allDone?"#00c853":inProgress?col.primary:"#3d2080",minWidth:80}}>{r}</span>
+                    <span className="badge" style={{background:allDone?"#00c85322":inProgress?col.bg+"44":"#1c1232",color:allDone?"#00c853":inProgress?col.primary:"#55449a",border:`1px solid ${allDone?"#00c85344":inProgress?col.border:"#3d2080"}`}}>
+                      {allDone?"✓ COMPLETE":inProgress?"● LIVE":"WAITING"}
+                    </span>
+                    <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>{seedList.length} battles</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
+
+        {/* ── LAST CALL TAB (Emcee exclusive) ── */}
+        {tab==="lastcall"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:"#7fff00",marginBottom:4}}>📣 LAST CALL · {activeCat}</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>Participants who have NOT checked in yet. Announce these names for final check-in.</div>
+            {notCheckedIn.length===0?(
+              <div style={{background:"#051a07",border:"1px solid #00c85333",borderRadius:12,padding:"24px",textAlign:"center"}}>
+                <div style={{fontSize:32,marginBottom:8}}>✅</div>
+                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#00c853",letterSpacing:2}}>ALL PARTICIPANTS CHECKED IN</div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginTop:4}}>No last call needed for {activeCat}</div>
+              </div>
+            ):(
+              <div>
+                <div style={{background:"#0a1a00",border:"1px solid #7fff0033",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,color:"#7fff00",marginBottom:6}}>📣 NOT YET CHECKED IN — ANNOUNCE NOW</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {notCheckedIn.map(p=>(
+                      <span key={p.id} style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,padding:"6px 14px",background:"#120e22",border:"1px solid #ff4d4d44",borderRadius:20,color:"#ff4d4d"}}>{p.name}</span>
+                    ))}
+                  </div>
+                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc",marginTop:10}}>
+                    Script: <em style={{color:"#e0d0ff"}}>"Last call — {notCheckedIn.map(p=>p.name).join(", ")} — please check in at the registration desk immediately or you will be disqualified!"</em>
+                  </div>
+                </div>
+                {catParts.filter(p=>p.disqualified).length>0&&(
+                  <div style={{background:"#150608",border:"1px solid #ff4d4d33",borderRadius:10,padding:"12px 16px"}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,color:"#ff4d4d",letterSpacing:2,marginBottom:6}}>DISQUALIFIED</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {catParts.filter(p=>p.disqualified).map(p=>(
+                        <span key={p.id} style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"4px 10px",background:"#1a0a0a",border:"1px solid #ff4d4d33",borderRadius:20,color:"#ff4d4d55"}}>{p.name} ✗</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ANNOUNCEMENTS TAB ── */}
+        {tab==="announcements"&&(
+          <div className="slide">
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>ANNOUNCEMENTS LOG</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:16}}>All announcements sent during this event.</div>
+            <NotificationHistoryPanel history={notifHistory} isHost={false}/>
+          </div>
+        )}
+
       </div>
     </div>
   );
 }
 
+
 // ─────────────────────────────────────────────────────────────────
 // ROUND SETUP TAB — organizer configures knockout rounds after prelims
 // ─────────────────────────────────────────────────────────────────
-// HOW ODD NUMBERS WORK (e.g. Top 19):
-//   19 dancers → 8 normal 1v1 battles + 1 three-way battle (middle 3 seeds)
-//   = 9 battles total, 9 winners advance to next round
-//   The system handles this automatically — organizer just picks the count.
-// ─────────────────────────────────────────────────────────────────
-function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categories, readOnly=false }) {
+function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categories }) {
   const currentKnockout = (eventRounds||[]).filter(r => r !== "Prelims");
   const [selected, setSelected] = useState(currentKnockout);
   const [hasChanges, setHasChanges] = useState(false);
-  const [customN, setCustomN] = useState("");
-
-  // Sync when eventRounds updates from outside (e.g. realtime)
-  useEffect(()=>{
-    const ko=(eventRounds||[]).filter(r=>r!=="Prelims");
-    setSelected(ko);
-    setHasChanges(false);
-  },[eventRounds]);
 
   const toggle = (r) => {
-    if(readOnly)return;
     const next = selected.includes(r) ? selected.filter(x=>x!==r) : [...selected, r];
     setSelected(next);
     setHasChanges(true);
   };
 
-  const addCustomRound = () => {
-    if(readOnly)return;
-    const n = parseInt(customN);
-    if(isNaN(n)||n<2||n>999)return;
-    const name = n===2?"Finals":`Top ${n}`;
-    if(!selected.includes(name)){
-      setSelected(prev=>[...prev,name]);
-      setHasChanges(true);
-    }
-    setCustomN("");
-  };
-
-  // Sort selected rounds: by dancer count descending, Finals always last
-  const sortRounds = (arr) => {
-    return [...arr].sort((a,b)=>{
-      if(a==="Finals")return 1;
-      if(b==="Finals")return -1;
-      return getRoundLimit(b)-getRoundLimit(a);
-    });
-  };
-
-  const orderedSelected = sortRounds(selected);
+  const orderedSelected = ALL_POST_PRELIM_ROUNDS.filter(r => selected.includes(r));
   const fullFlow = ["Prelims", ...orderedSelected];
 
+  // Participant count summary per category
   const totalCheckedIn = participants.filter(p=>p.checked_in).length;
   const totalParticipants = participants.length;
 
-  const describeBattles = (n) => {
-    if (n < 2) return "";
-    if (n === 2) return "1 battle of 1v1 (Finals)";
-    if (n % 2 === 0) return `${n/2} battles of 1v1`;
-    const normal = (n-3)/2;
-    return `${normal} battles of 1v1  +  1 three-way battle (middle 3 seeds)  =  ${normal+1} battles total`;
-  };
-
   const handleSave = () => {
-    if (orderedSelected.length === 0||readOnly) return;
+    if (orderedSelected.length === 0) return;
     onSave(["Prelims", ...orderedSelected]);
     setHasChanges(false);
   };
 
   return (
     <div className="slide">
-      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>⚡ ROUND SETUP{readOnly?" (VIEW)":""}</div>
-      {readOnly?(
-        <div style={{background:"#1a0e00",border:"1px solid #ff980044",borderRadius:8,padding:"8px 14px",marginBottom:16,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
-          🎤 View-only — only the organizer can change the round flow.
-        </div>
-      ):(
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#9980cc",marginBottom:16}}>
-          Configure the knockout rounds that happen after Prelims. Any Top N is supported — even or odd. The exact count of who advances is set in the <strong style={{color:"#ffd700"}}>HOST</strong> tab.
-        </div>
-      )}
-
-      {/* Odd-number explainer */}
-      <div style={{background:"#0d1a00",border:"1px solid #7fff0033",borderRadius:10,padding:"14px 16px",marginBottom:20}}>
-        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:3,color:"#7fff00",marginBottom:6}}>🔢 ANY NUMBER WORKS — EVEN OR ODD</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {[
-            {n:16,label:"Even (Top 16)",desc:"8 battles of 1v1",color:"#00e5ff"},
-            {n:19,label:"Odd (Top 19)",desc:"8 battles of 1v1  +  1 three-way\n= 9 battles, 9 winners advance",color:"#7fff00"},
-          ].map(ex=>(
-            <div key={ex.n} style={{background:"#0b0818",border:`1px solid ${ex.color}33`,borderRadius:8,padding:"10px 12px"}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:ex.color,marginBottom:4}}>{ex.label}</div>
-              <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc",whiteSpace:"pre-line"}}>{ex.desc}</div>
-            </div>
-          ))}
-        </div>
+      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>⚡ ROUND SETUP</div>
+      <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#9980cc",marginBottom:20}}>
+        Configure which knockout rounds happen after Prelims. Any combination is valid — odd pools create 1 three-way battle automatically.
       </div>
 
       {/* Participant count hint */}
@@ -2396,154 +2521,103 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginTop:2}}>CHECKED IN</div>
         </div>
         <div style={{flex:1,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",display:"flex",alignItems:"center"}}>
-          {totalCheckedIn>=32?"💡 32+ dancers — consider Top 32, Top 25 or Top 19"
-          :totalCheckedIn>=19?"💡 19–31 dancers — Top 19, Top 21, Top 25 work well"
-          :totalCheckedIn>=16?"💡 16–18 dancers — Top 14, Top 16 or Top 17 recommended"
-          :totalCheckedIn>=8?"💡 8–15 dancers — Top 8 recommended"
-          :totalCheckedIn>=4?"💡 4–7 dancers — Top 4 or Finals only"
-          :"💡 Under 4 checked in — Finals only"}
+          {totalCheckedIn>=32?"💡 32+ dancers → Top 32 → Top 16 → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=16?"💡 16–31 dancers → Top 16 → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=8?"💡 8–15 dancers → Top 8 → Top 4 → Finals recommended"
+          :totalCheckedIn>=4?"💡 4–7 dancers → Top 4 → Finals recommended"
+          :"💡 Under 4 checked in — Finals only recommended"}
         </div>
       </div>
 
-      {/* Round selector — preset chips */}
+      {/* Round toggles */}
       <div style={{background:"#120e22",border:"1px solid #2a1f4a",borderRadius:12,padding:"18px 20px",marginBottom:16}}>
-        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>SELECT OR ADD KNOCKOUT ROUNDS</div>
-
-        {/* Preset round buttons */}
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2,marginBottom:12}}>SELECT KNOCKOUT ROUNDS AFTER PRELIMS</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:16}}>
-          {PRESET_POST_PRELIM_ROUNDS.map(r => {
+          {ALL_POST_PRELIM_ROUNDS.map(r => {
             const isOn = selected.includes(r);
-            const n = getRoundLimit(r);
-            const isOdd = n>3 && n%2!==0;
+            const limit = getRoundSize(r);
+            const fits = limit === 2 || totalCheckedIn === 0 || totalCheckedIn >= limit * 0.5;
             return (
               <button key={r}
                 onClick={()=>toggle(r)}
-                disabled={readOnly}
                 style={{
                   fontFamily:"Bebas Neue,sans-serif",fontSize:14,letterSpacing:2,
-                  padding:"10px 18px",borderRadius:8,cursor:readOnly?"default":"pointer",transition:"all .15s",
+                  padding:"10px 20px",borderRadius:8,cursor:"pointer",transition:"all .15s",
                   background:isOn?col.bg:"#160e2a",
-                  border:`2px solid ${isOn?col.primary:isOdd?"#7fff0044":"#3d2080"}`,
-                  color:isOn?col.primary:isOdd?"#7fff00":"#55449a",
+                  border:`2px solid ${isOn?col.primary:"#3d2080"}`,
+                  color:isOn?col.primary:"#55449a",
                 }}>
                 {isOn?"✓ ":""}{r}
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:isOn?col.primary+"aa":isOdd?"#7fff0088":"#3d2080",letterSpacing:0,marginTop:3}}>
-                  {n===2?"1 battle · Finals":isOdd?`${(n-3)/2+1} battles · 3-way included`:`${n/2} battles · ${n} dancers`}
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:isOn?col.primary+"aa":"#3d2080",letterSpacing:0,marginTop:2}}>
+                  {r==="Finals"?"2 dancers":`${getRoundSize(r)} dancers`}
                 </div>
               </button>
             );
           })}
         </div>
 
-        {/* Custom Top N adder */}
-        {!readOnly&&(
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",letterSpacing:2}}>ADD CUSTOM TOP N:</div>
-            <input className="inp" type="number" min={2} max={999} placeholder="e.g. 14, 17, 21…"
-              value={customN} onChange={e=>setCustomN(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&addCustomRound()}
-              style={{width:130,fontFamily:"Bebas Neue,sans-serif",fontSize:16,letterSpacing:2}}/>
-            <button className="btn" style={{background:col.primary,color:"#000",fontSize:11,padding:"7px 16px"}} onClick={addCustomRound}>+ ADD</button>
-            <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>Add any Top N (Top 14, Top 17, Top 21, Top 25…)</span>
-          </div>
-        )}
-
-        {/* Selected rounds — with remove buttons */}
-        {selected.length>0&&!readOnly&&(
-          <div style={{marginBottom:14}}>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginBottom:8}}>YOUR SELECTED ROUNDS (click × to remove):</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {orderedSelected.map(r=>(
-                <span key={r} style={{display:"flex",alignItems:"center",gap:4,fontFamily:"Bebas Neue,sans-serif",fontSize:13,padding:"5px 12px",borderRadius:6,background:col.bg,border:`1px solid ${col.border}`,color:col.primary}}>
-                  {r}
-                  <button onClick={()=>toggle(r)} style={{background:"none",border:"none",color:"#ff4d4d",cursor:"pointer",fontFamily:"Barlow,sans-serif",fontSize:12,padding:"0 0 0 4px",lineHeight:1}}>×</button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Flow preview */}
         <div style={{background:"#0b0818",border:"1px solid #2a1f4a",borderRadius:8,padding:"10px 14px"}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:6}}>COMPETITION FLOW PREVIEW</div>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:orderedSelected.length>0?10:0}}>
+          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:6}}>FLOW PREVIEW</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             {fullFlow.map((r,i) => (
               <span key={r} style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,padding:"4px 12px",borderRadius:6,
+                <span style={{
+                  fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,
+                  padding:"4px 12px",borderRadius:6,
                   background:r==="Prelims"?"#1a1428":col.bg,
                   border:`1px solid ${r==="Prelims"?"#ffd70033":col.border}`,
-                  color:r==="Prelims"?"#ffd700":col.primary}}>{r}</span>
+                  color:r==="Prelims"?"#ffd700":col.primary
+                }}>{r}</span>
                 {i < fullFlow.length-1 && <span style={{color:"#3d2080",fontSize:12}}>→</span>}
               </span>
             ))}
             {orderedSelected.length===0 && <span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d"}}>⚠ Select at least one knockout round</span>}
           </div>
-          {orderedSelected.length>0&&(
-            <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:8}}>
-              {orderedSelected.map(r=>{
-                const n=getRoundLimit(r);
-                return (
-                  <div key={r} style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",padding:"3px 0"}}>
-                    <span style={{color:col.primary,fontFamily:"Bebas Neue,sans-serif",letterSpacing:1,marginRight:8}}>{r}:</span>
-                    {n>0 ? describeBattles(n) : "count set in HOST tab"}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
 
       {/* Quick presets */}
-      {!readOnly&&(
-        <div style={{marginBottom:20}}>
-          <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>QUICK PRESETS</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {[
-              {label:"🔥 Top 19 → Finals",rounds:["Top 19","Finals"],highlight:true},
-              {label:"Top 14 → Finals",rounds:["Top 14","Finals"]},
-              {label:"Top 4 → Finals",rounds:["Top 4","Finals"]},
-              {label:"Top 8 → Finals",rounds:["Top 8","Top 4","Finals"]},
-              {label:"Top 16 → Finals",rounds:["Top 16","Top 8","Top 4","Finals"]},
-              {label:"Top 17 → Top 8 → Finals",rounds:["Top 17","Top 8","Top 4","Finals"],highlight:true},
-              {label:"Top 19 → Top 8 → Finals",rounds:["Top 19","Top 8","Top 4","Finals"],highlight:true},
-              {label:"Top 21 → Top 8 → Finals",rounds:["Top 21","Top 8","Top 4","Finals"]},
-              {label:"Top 25 → Top 8 → Finals",rounds:["Top 25","Top 8","Top 4","Finals"]},
-              {label:"Top 32 → Top 16 → Finals",rounds:["Top 32","Top 16","Top 8","Top 4","Finals"]},
-              {label:"Finals Only",rounds:["Finals"]},
-            ].map(p=>(
-              <button key={p.label}
-                onClick={()=>{setSelected(p.rounds);setHasChanges(true);}}
-                style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"7px 14px",borderRadius:6,
-                  background:p.highlight?"#0d1a00":"#160e2a",
-                  border:`1px solid ${p.highlight?"#7fff0055":"#3d2080"}`,
-                  color:p.highlight?"#7fff00":"#9980cc",cursor:"pointer",transition:"all .15s"}}>
-                {p.label}
-              </button>
-            ))}
-          </div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:8}}>QUICK PRESETS</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[
+            {label:"Top 4 → Finals",rounds:["Top 4","Finals"]},
+            {label:"Top 8 → Finals",rounds:["Top 8","Top 4","Finals"]},
+            {label:"Top 16 → Finals",rounds:["Top 16","Top 8","Top 4","Finals"]},
+            {label:"Top 32 → Finals",rounds:["Top 32","Top 16","Top 8","Top 4","Finals"]},
+            {label:"Top 15 → Top 7 → Finals",rounds:["Top 15","Finals"]},
+            {label:"Top 18 → Top 8 → Finals",rounds:["Top 18","Top 8","Finals"]},
+            {label:"Top 27 → Top 12 → Finals",rounds:["Top 27","Top 12","Finals"]},
+            {label:"Finals Only",rounds:["Finals"]},
+          ].map(p=>(
+            <button key={p.label}
+              onClick={()=>{setSelected(p.rounds);setHasChanges(true);}}
+              style={{fontFamily:"Barlow,sans-serif",fontSize:11,padding:"6px 14px",borderRadius:6,
+                background:"#160e2a",border:"1px solid #3d2080",color:"#9980cc",cursor:"pointer",
+                transition:"all .15s"}}>
+              {p.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Currently saved */}
+      {/* Current saved flow */}
       <div style={{background:"#0a1a0a",border:"1px solid #00c85333",borderRadius:8,padding:"10px 14px",marginBottom:20,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#00c853"}}>
         💾 Currently saved: <strong>{(eventRounds||[]).join(" → ")||"Prelims only"}</strong>
       </div>
 
-      {!readOnly&&(
-        <>
-          <button className="btn"
-            style={{background:orderedSelected.length>0?col.primary:"#1c1232",color:orderedSelected.length>0?"#000":"#55449a",fontSize:14,padding:"13px 32px",opacity:hasChanges?1:0.5}}
-            onClick={handleSave}
-            disabled={saving||orderedSelected.length===0||!hasChanges}>
-            {saving?<Spinner/>:hasChanges?"💾 SAVE ROUND FLOW →":"✓ SAVED"}
-          </button>
-          {!hasChanges&&orderedSelected.length>0&&(
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginTop:10}}>
-              Round flow saved ✓ — Judges, Emcee and viewers will see these rounds live.
-            </div>
-          )}
-        </>
+      <button className="btn"
+        style={{background:orderedSelected.length>0?col.primary:"#1c1232",color:orderedSelected.length>0?"#000":"#55449a",fontSize:14,padding:"13px 32px",opacity:hasChanges?1:0.5}}
+        onClick={handleSave}
+        disabled={saving||orderedSelected.length===0||!hasChanges}>
+        {saving?<Spinner/>:hasChanges?"💾 SAVE ROUND FLOW →":"✓ SAVED"}
+      </button>
+
+      {!hasChanges&&orderedSelected.length>0&&(
+        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",marginTop:10}}>
+          Round flow is saved. Judges and attendees will see these rounds live.
+        </div>
       )}
     </div>
   );
@@ -2552,7 +2626,7 @@ function RoundSetupTab({ col, eventRounds, onSave, saving, participants, categor
 // ─────────────────────────────────────────────────────────────────
 // HOST DASHBOARD TAB — live event flow controller
 // ─────────────────────────────────────────────────────────────────
-function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast, readOnly=false, announcementsOnly=false }) {
+function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, getScore, battles, participantMap, showToast }) {
   const allRounds  = eventRounds || event.rounds || ["Prelims"];
   const knockoutRounds = allRounds.filter(r => r !== "Prelims");
 
@@ -2592,12 +2666,15 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
     setNotifMsg(""); setNotifRound(""); setNotifSending(false);
   };
 
-  // Dynamic quick announcements based on actual configured rounds
   const QUICK_ANNOUNCEMENTS = [
     { label:"PRELIMS STARTING", msg:"Prelims are starting now! All participants please get ready.", round:"Prelims" },
     { label:"TOP 32 STARTING",  msg:"Top 32 battles are about to begin! Take your positions.", round:"Top 32" },
     { label:"TOP 16 STARTING",  msg:"Top 16 is starting now! The bracket heats up.", round:"Top 16" },
+    { label:"TOP 8 STARTING",   msg:"Top 8 — Quarterfinals starting now!", round:"Top 8" },
+    { label:"TOP 4 STARTING",   msg:"Top 4 — Semifinals starting now!", round:"Top 4" },
     { label:"FINALS STARTING",  msg:"THE FINALS ARE STARTING! The crowd goes wild!", round:"Finals" },
+    { label:"SHORT BREAK",      msg:"Short break — back in 10 minutes.", round:"" },
+    { label:"RESULTS SOON",     msg:"Results coming up shortly. Stay tuned!", round:"" },
   ];
 
   const totalIn = checkedIn.length;
@@ -2611,34 +2688,20 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
   const bracketTooLarge = false; // no cap — any number is allowed
   const activeN      = confirmed && validN ? parsed : null;
 
-  // Quick pick buttons — show sensible defaults based on checked-in count
-  const smartOpts = ()=>{
-    const opts=[];
-    if(totalIn>=4) opts.push(4);
-    if(totalIn>=8) opts.push(8);
-    if(totalIn>=12) opts.push(12);
-    if(totalIn>=16) opts.push(16);
-    if(totalIn>=20) opts.push(20);
-    if(totalIn>=24) opts.push(24);
-    if(totalIn>=32) opts.push(32);
-    // Always include totalIn itself if not already there
-    if(totalIn>=2&&!opts.includes(totalIn)) opts.push(totalIn);
-    return opts.filter(n=>n<=totalIn);
-  };
-  const quickOpts = smartOpts();
-
+  // Quick pick buttons — common bracket sizes
+  const quickOpts = [4,6,8,10,12,15,16,18,20,24,27,32].filter(n => n <= totalIn);
   const advancing  = activeN ? prelimRanked.slice(0, activeN) : [];
 
-  // Active rounds: use all configured knockout rounds.
-  // No ROUND_LIMIT filter — organizer picks exactly how many advance (any number ≥ 2).
-  // buildBattlesFromSeeds handles odd numbers with a 3-way battle.
-  const activeRounds = knockoutRounds;
+  // Active rounds: all configured knockout rounds (any size allowed — host chose them in round setup)
+  const activeRounds = activeN
+    ? knockoutRounds.filter(r => getRoundSize(r) >= 2 && getRoundSize(r) <= activeN)
+    : knockoutRounds;
 
-  // Build battles from the full seedList — no ROUND_LIMIT cap.
-  // The organizer controls how many advance; odd numbers get a 3-way middle battle.
+  // Build battles using shared buildBattlesFromSeeds (handles odd → 3-way last battle)
   const buildRoundBattlesFixed = (roundName, seedList) => {
-    if (!seedList || seedList.length < 2) return [];
-    return buildBattlesFromSeeds(seedList, roundName);
+    const pool = seedList.slice(0, getRoundSize(roundName));
+    if (pool.length < 2) return [];
+    return buildBattlesFromSeeds(pool, roundName);
   };
 
   // Resolve a battle, also checking host force-overrides
@@ -2657,7 +2720,7 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
     const ko = activeRounds;
     const idx = ko.indexOf(roundName);
     if (idx < 0) return [];
-    if (idx === 0) return advancing;
+    if (idx === 0) return advancing.slice(0, getRoundSize(roundName));
     const prevRound = ko[idx - 1];
     const prevBattles = buildRoundBattlesFixed(prevRound, getSeedListForRound(prevRound));
     const winners = [];
@@ -2705,17 +2768,10 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
 
   return (
     <div className="slide">
-      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>{announcementsOnly?"SEND ANNOUNCEMENT":"HOST FLOW · "+activeCat}</div>
-      {!announcementsOnly&&readOnly&&(
-        <div style={{background:"#1a0e00",border:"1px solid #ff980044",borderRadius:8,padding:"8px 14px",marginBottom:14,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff9800"}}>
-          🎤 View-only — only the organizer can confirm brackets and use host overrides.
-        </div>
-      )}
-      {!announcementsOnly&&(
+      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>HOST FLOW · {activeCat}</div>
       <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:20}}>
         Control the live event flow. Decide how many advance from prelims, then run the bracket. Use <strong style={{color:"#ffd700"}}>Force Advance</strong> anytime to manually pick a winner and keep the event moving.
       </div>
-      )}
 
       {/* ── ANNOUNCEMENTS ── */}
       <div style={{background:"#120e22",border:"1px solid #ff980033",borderRadius:12,overflow:"hidden",marginBottom:20}}>
@@ -2774,10 +2830,6 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
         </div>
       </div>
 
-      {/* If announcementsOnly mode — stop here, don't render the bracket flow */}
-      {announcementsOnly&&<div/>}
-      {!announcementsOnly&&<>
-
       {/* ── STEP 1: PRELIMS ── */}
       <div style={{background:"#120e22",border:`1px solid ${prelimDone?"#00c85344":"#2a1f4a"}`,borderRadius:12,overflow:"hidden",marginBottom:14}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:prelimDone?"#051a07":"#0f0b1e",borderBottom:"1px solid #1a1a1a"}}>
@@ -2812,81 +2864,34 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
 
               <div style={{background:"#0b0818",border:"1px solid #2a1f4a",borderRadius:10,padding:"14px 16px"}}>
                 <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginBottom:6}}>HOW MANY ADVANCE TO KNOCKOUT?</div>
-                <div style={{background:"#0b0818",border:"1px solid #1a1f1a",borderRadius:8,padding:"8px 12px",marginBottom:12,fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc"}}>
-                  Pick any number ≥ 2. <strong style={{color:"#7fff00"}}>Odd numbers</strong> (e.g. 19) automatically create <strong style={{color:"#7fff00"}}>8 battles of 1v1 + 1 three-way battle</strong> for the middle 3 seeds. Even numbers create all 1v1 battles.
-                </div>
                 {totalIn>0&&<div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginBottom:10,padding:"5px 10px",background:"#0b0818",borderRadius:6,border:"1px solid #161616"}}>
-                  📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Enter any number from 2 to {totalIn}
+                  📋 <strong style={{color:"#fff"}}>{totalIn}</strong> checked in · Any number 2–{totalIn} is valid · Odd count = 1 three-way battle
                 </div>}
-                {/* Quick pick buttons */}
-                {quickOpts.length>0&&(
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-                    {quickOpts.map(n=>{
-                      const isOdd=n%2!==0&&n>3;
-                      return (
-                        <button key={n} onClick={()=>{setAdvanceN(String(n));setConfirmed(false);}}
-                          style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,padding:"6px 14px",borderRadius:7,cursor:"pointer",transition:"all .15s",
-                            border:`1px solid ${advanceN===String(n)?col.primary:n===19?"#7fff0044":"#3d2080"}`,
-                            background:advanceN===String(n)?col.bg:n===19?"#0d1a00":"#160e2a",
-                            color:advanceN===String(n)?col.primary:n===19?"#7fff00":"#7755aa"}}>
-                          TOP {n}{isOdd&&<span style={{fontSize:9,marginLeft:4,opacity:.7}}>★</span>}
-                        </button>
-                      );
-                    })}
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",display:"flex",alignItems:"center",marginLeft:4}}>★ = includes 3-way battle</div>
-                  </div>
-                )}
-                <div style={{display:"flex",gap:10,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
-                  <div style={{flex:1,minWidth:180}}>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",letterSpacing:2,marginBottom:6}}>OR TYPE ANY NUMBER (2 – {totalIn})</div>
-                    <input className="inp" type="number" min={2} max={totalIn} placeholder={`e.g. 17`}
-                      value={advanceN} onChange={e=>{setAdvanceN(e.target.value);setConfirmed(false);}}
-                      style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,letterSpacing:2}}/>
-                  </div>
-                  {totalIn>0&&(
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",maxWidth:200}}>
-                      💡 Any number works. Odd numbers get a 3-way battle for the middle slot automatically.
-                    </div>
-                  )}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
+                  {quickOpts.map(n=>(
+                    <button key={n} onClick={()=>{setAdvanceN(String(n));setConfirmed(false);}}
+                      style={{fontFamily:"Bebas Neue,sans-serif",fontSize:14,padding:"7px 16px",borderRadius:8,
+                        border:`1px solid ${advanceN===String(n)?col.primary:"#3d2080"}`,
+                        background:advanceN===String(n)?col.bg:"#160e2a",
+                        color:advanceN===String(n)?col.primary:"#7755aa",cursor:"pointer",transition:"all .15s"}}>
+                      TOP {n}
+                    </button>
+                  ))}
+                  <input className="inp" type="number" min={2} max={totalIn} placeholder={`2–${totalIn}`}
+                    value={advanceN} onChange={e=>{setAdvanceN(e.target.value);setConfirmed(false);}}
+                    style={{width:80,fontFamily:"Bebas Neue,sans-serif",fontSize:14}}/>
                 </div>
                 {validN&&!confirmed&&(
-                  <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:8}}>
-                    {/* Battle breakdown preview */}
-                    <div style={{background:"#0b0818",border:`1px solid ${col.border}33`,borderRadius:8,padding:"10px 14px"}}>
-                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#55449a",letterSpacing:2,marginBottom:6}}>BRACKET PREVIEW · TOP {parsed}</div>
-                      {parsed%2===0?(
-                        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc"}}>
-                          <span style={{color:"#00e5ff",fontFamily:"Bebas Neue,sans-serif",fontSize:14}}>{parsed/2}</span> battles of 1v1 — all standard knockouts
-                        </div>
-                      ):(
-                        <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                          <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc"}}>
-                            <span style={{color:"#00e5ff",fontFamily:"Bebas Neue,sans-serif",fontSize:14}}>{(parsed-3)/2}</span> battles of 1v1
-                            <span style={{color:"#7755aa",margin:"0 8px"}}>+</span>
-                            <span style={{color:"#7fff00",fontFamily:"Bebas Neue,sans-serif",fontSize:14}}>1</span> three-way battle (middle 3 seeds)
-                            <span style={{color:"#7755aa",margin:"0 8px"}}>=</span>
-                            <span style={{color:col.primary,fontFamily:"Bebas Neue,sans-serif",fontSize:14}}>{(parsed-3)/2+1}</span> battles total
-                          </div>
-                          <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>
-                            Seeds {(parsed-3)/2+1}, {(parsed-3)/2+2}, {(parsed-3)/2+3} fight in the 3-way battle — only 1 advances
-                          </div>
-                        </div>
-                      )}
+                  <div style={{display:"flex",gap:10,alignItems:"center",marginTop:8,flexWrap:"wrap"}}>
+                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc",flex:1}}>
+                      Top <strong style={{color:col.primary}}>{parsed}</strong> advance · <strong style={{color:"#ff4d4d"}}>{totalIn-parsed}</strong> eliminated
+                      {activeRounds.length>0&&<span style={{color:"#7755aa"}}> · Rounds: {activeRounds.join(" → ")}</span>}
                     </div>
-                    <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc",flex:1}}>
-                        Top <strong style={{color:col.primary}}>{parsed}</strong> advance · <strong style={{color:"#ff4d4d"}}>{totalIn-parsed}</strong> eliminated
-                        {activeRounds.length>0&&<span style={{color:"#7755aa"}}> · Rounds: {activeRounds.join(" → ")}</span>}
-                      </div>
-                      <button className="btn" style={{background:col.primary,color:"#000",fontSize:12,padding:"9px 22px"}}
-                        disabled={false}
-                        onClick={async()=>{
-                        setConfirmed(true);
-                        await supabase.from("events").update({advance_count:parsed}).eq("id",event.id);
-                      }}>
-                        ✓ CONFIRM & START BRACKET
-                      </button>
-                    </div>
+                    <button className="btn" style={{background:col.primary,color:"#000",fontSize:12,padding:"9px 22px"}}
+                      disabled={false}
+                      onClick={()=>setConfirmed(true)}>
+                      ✓ CONFIRM & START BRACKET
+                    </button>
                   </div>
                 )}
                 {confirmed&&activeN&&(
@@ -2910,7 +2915,7 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
                 )}
                 {advanceN&&!validN&&!bracketTooLarge&&!isNaN(parsed)&&(
                   <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ff4d4d",marginTop:6}}>
-                    Must be between 2 and {totalIn}
+                    Must be between 2 and {Math.min(totalIn,maxAllowedBracket)}
                   </div>
                 )}
               </div>
@@ -3098,7 +3103,6 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
           <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#3d2080"}}>Select how many advance above, then confirm to generate the bracket.</div>
         </div>
       )}
-      </>}
     </div>
   );
 }
@@ -3106,131 +3110,6 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
 // ─────────────────────────────────────────────────────────────────
 // ORGANIZER DASHBOARD
 // ─────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────
-// STREAM OVERLAY — fullscreen display for projector/screen
-// Organizer picks exactly how many names to show manually
-// ─────────────────────────────────────────────────────────────────
-function StreamOverlay({ event, activeCat, col, currentRound, catSorted, getScore, onClose, battles, prelimRanked, participantMap, eventRounds }) {
-  const isPrelim = currentRound === "Prelims";
-  const [showCount, setShowCount] = useState(Math.min(catSorted.length, 16));
-  const list = catSorted.slice(0, showCount);
-
-  // Build current round battles for knockout display
-  const currentBattles = useMemo(()=>{
-    if(isPrelim) return [];
-    return buildRoundBattles(currentRound, eventRounds, prelimRanked, battles.filter(b=>b.category===activeCat), participantMap);
-  },[isPrelim, currentRound, eventRounds, prelimRanked, battles, activeCat, participantMap]);
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"#000000f8",zIndex:200,display:"flex",flexDirection:"column",padding:"28px 36px",overflowY:"auto"}}>
-      {/* Controls bar */}
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div className="pulse" style={{width:10,height:10,borderRadius:"50%",background:"#ff4d4d",flexShrink:0}}/>
-          <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:4,color:"#ff4d4d"}}>LIVE · {event.name.toUpperCase()}</span>
-        </div>
-        <div style={{flex:1}}/>
-        {isPrelim&&(
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a",letterSpacing:2}}>SHOW TOP</span>
-            <input
-              type="number" min={1} max={catSorted.length}
-              value={showCount}
-              onChange={e=>{const v=parseInt(e.target.value);if(!isNaN(v)&&v>=1)setShowCount(Math.min(v,catSorted.length));}}
-              style={{background:"#120e22",border:"1px solid #7c3aed",color:"#c084fc",borderRadius:6,width:60,height:32,textAlign:"center",fontFamily:"Bebas Neue,sans-serif",fontSize:18,outline:"none"}}
-            />
-            <span style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#55449a"}}>of {catSorted.length}</span>
-            <div style={{display:"flex",gap:6,marginLeft:8}}>
-              {[4,8,16,32].filter(n=>n<=catSorted.length).map(n=>(
-                <button key={n} onClick={()=>setShowCount(n)}
-                  style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,padding:"4px 10px",borderRadius:5,cursor:"pointer",
-                    background:showCount===n?col.bg:"#120e22",border:`1px solid ${showCount===n?col.primary:"#2a1f4a"}`,
-                    color:showCount===n?col.primary:"#55449a"}}>
-                  {n}
-                </button>
-              ))}
-              <button onClick={()=>setShowCount(catSorted.length)}
-                style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,padding:"4px 10px",borderRadius:5,cursor:"pointer",
-                  background:showCount===catSorted.length?col.bg:"#120e22",border:`1px solid ${showCount===catSorted.length?col.primary:"#2a1f4a"}`,
-                  color:showCount===catSorted.length?col.primary:"#55449a"}}>
-                ALL
-              </button>
-            </div>
-          </div>
-        )}
-        <button className="btn" style={{background:"#1c1232",color:"#777",border:"1px solid #3d2080",fontSize:11}} onClick={onClose}>✕ CLOSE</button>
-      </div>
-
-      {/* Title */}
-      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:42,letterSpacing:3,lineHeight:1,marginBottom:4}}>
-        {currentRound} <span style={{color:col.primary}}>· {activeCat}</span>
-      </div>
-      <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#55449a",letterSpacing:2,marginBottom:20}}>
-        {isPrelim?`${event.city} · Showing top ${showCount} of ${catSorted.length}`:`${event.city} · ${currentBattles.length} battle${currentBattles.length!==1?"s":""}`}
-      </div>
-
-      {/* PRELIM: ranked leaderboard */}
-      {isPrelim&&(
-        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {list.map((p,i)=>(
-            <div key={p.id} style={{display:"flex",alignItems:"center",gap:14,background:i<3?col.bg:"#0f0b1e",border:`1px solid ${i<3?col.border:"#170f2c"}`,borderRadius:8,padding:"10px 16px"}}>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:22,color:i<3?col.primary:"#3d2080",minWidth:42}}>#{i+1}</div>
-              <div style={{flex:1}}>
-                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18}}>{p.name}</div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div>
-              </div>
-              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#fff",minWidth:36,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-            </div>
-          ))}
-          {list.length===0&&<div style={{textAlign:"center",padding:"40px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No participants yet</div>}
-        </div>
-      )}
-
-      {/* KNOCKOUT: battle cards */}
-      {!isPrelim&&(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {currentBattles.length===0&&<div style={{textAlign:"center",padding:"40px",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>Waiting for bracket to be seeded…</div>}
-          {currentBattles.map(battle=>{
-            const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
-            const is3way=!!battle.p3;
-            const decs=battles.filter(b=>b.round===currentRound&&b.match_index===battle.match_index&&b.category===activeCat);
-            const result=resolveBattle(decs);
-            const isDecided=result.status==="decided";
-            const isTied=result.status==="tied";
-            return (
-              <div key={battle.match_index} style={{background:"#120e22",border:`1px solid ${isDecided?col.border:"#2a1f4a"}`,borderRadius:12,overflow:"hidden"}}>
-                <div style={{padding:"8px 18px",background:"#0b0818",fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:col.primary,letterSpacing:3,borderBottom:"1px solid #1a1a1a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>BATTLE {battle.match_index+1}{is3way?" · 3-WAY":""}</span>
-                  <div style={{display:"flex",gap:8}}>
-                    {isDecided&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#00c853"}}>🏆 {result.winner_name} WINS</span>}
-                    {isTied&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",background:"#ffd70011",padding:"2px 8px",borderRadius:6}}>🤝 TIE × {result.tie_round+1}</span>}
-                    {result.status==="pending"&&<span style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa"}}>Judges deciding…</span>}
-                  </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr",alignItems:"stretch"}}>
-                  {fighters.map((p,fi)=>{
-                    const isWinner=isDecided&&result.winner_id===p.id;
-                    const isLoser=isDecided&&result.winner_id!==p.id;
-                    return (
-                      <div key={p.id} style={{padding:"18px 20px",textAlign:"center",background:isWinner?"#051a07":isLoser?"#150608":"#110d22",opacity:isLoser?0.45:1,borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
-                        <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:26,color:isWinner?col.primary:"#fff",lineHeight:1}}>{p.name}</div>
-                        <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginTop:3}}>{p.city}</div>
-                        {isWinner&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,color:col.primary,marginTop:8,letterSpacing:1}}>🏆 WINNER</div>}
-                      </div>
-                    );
-                  })}
-                  {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 12px",fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:"#2a1840"}}>VS</div>}
-                </div>
-                {isTied&&<div style={{padding:"8px 18px",background:"#13111a",fontFamily:"Barlow,sans-serif",fontSize:11,color:"#ffd700",borderTop:"1px solid #2a2000"}}>🔄 Tie — same dancers battle again</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Dashboard({ event, memberName, onBack, showToast }) {
   const categories = event.categories||[];
   const [tab,setTab]=useState("organizer");
@@ -3379,7 +3258,79 @@ function Dashboard({ event, memberName, onBack, showToast }) {
       <LiveNotifBanner popup={liveNotif} onDismiss={dismissPopup}/>
 
       {/* Stream overlay */}
-      {overlayActive&&<StreamOverlay event={event} activeCat={activeCat} col={col} currentRound={currentRound} catSorted={catSorted} getScore={getScore} onClose={()=>setOverlayActive(false)} battles={battles.filter(b=>b.category===activeCat)} prelimRanked={prelimRanked} participantMap={participantMap} eventRounds={eventRounds}/>}
+      {overlayActive&&(()=>{
+        const isPrelimOv=currentRound==="Prelims";
+        const koRounds=(eventRounds||[]).filter(r=>r!=="Prelims");
+        // Determine the most active knockout round
+        const activeKORound=!isPrelimOv?currentRound:koRounds.find(r=>{
+          const decs=battles.filter(b=>b.category===activeCat&&b.round===r);
+          return decs.length>0;
+        })||null;
+        return (
+          <div style={{position:"fixed",inset:0,background:"#000000f5",zIndex:200,display:"flex",flexDirection:"column",padding:36,overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+              <div className="pulse" style={{width:10,height:10,borderRadius:"50%",background:"#ff4d4d"}}/>
+              <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:4,color:"#ff4d4d"}}>LIVE · {event.name.toUpperCase()}</span>
+              <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:3,color:col.primary,marginLeft:8}}>{activeCat}</span>
+            </div>
+            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:36,letterSpacing:3,lineHeight:1,marginBottom:4}}>
+              {activeKORound?activeKORound:<span style={{color:"#ffd700"}}>PRELIMS</span>} <span style={{color:col.primary,fontSize:22}}>· {activeCat}</span>
+            </div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",letterSpacing:2,marginBottom:24}}>{event.city}</div>
+            {!activeKORound?(
+              /* Prelim live rankings */
+              <div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#ffd700",letterSpacing:3,marginBottom:12}}>PRELIM RANKINGS — LIVE</div>
+                {prelimRanked.slice(0,20).map((p,i)=>(
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,background:i<3?col.bg:"#0f0b1e",border:`1px solid ${i<3?col.border:"#170f2c"}`,borderRadius:8,padding:"9px 13px",marginBottom:6}}>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#3d2080",minWidth:34}}>#{i+1}</div>
+                    <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16,color:i<3?col.primary:"#fff",minWidth:28,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
+                  </div>
+                ))}
+              </div>
+            ):(
+              /* Knockout bracket battles */
+              <div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:col.primary,letterSpacing:3,marginBottom:12}}>{activeKORound} BATTLES</div>
+                {(()=>{
+                  const koIdx=koRounds.indexOf(activeKORound);
+                  const seedList=koIdx===0?prelimRanked:getWinnersOfRound(koRounds[koIdx-1],battles.filter(b=>b.category===activeCat),participantMap);
+                  return buildBattlesFromSeeds(seedList,activeKORound);
+                })().map((battle,bi)=>{
+                  const fighters=[battle.p1,battle.p2,...(battle.p3?[battle.p3]:[])];
+                  const is3way=!!battle.p3;
+                  const decs=battles.filter(b=>b.round===activeKORound&&b.match_index===battle.match_index&&b.category===activeCat);
+                  const result=resolveBattle(decs);
+                  const isDecided=result.status==="decided";
+                  return (
+                    <div key={bi} style={{background:"#0f0b1e",border:`1px solid ${isDecided?col.border:"#2a1f4a"}`,borderRadius:10,marginBottom:10,overflow:"hidden"}}>
+                      <div style={{padding:"6px 14px",background:"#0a0612",fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:col.primary,letterSpacing:3}}>
+                        BATTLE {bi+1}{is3way?" · 3-WAY":""}{isDecided&&<span style={{color:"#00c853",marginLeft:10}}>✓ {result.winner_name}</span>}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:is3way?"1fr 1fr 1fr":"1fr auto 1fr"}}>
+                        {fighters.map((p,fi)=>{
+                          const isW=isDecided&&result.winner_id===p.id;
+                          const isL=isDecided&&!isW;
+                          return (
+                            <div key={p.id} style={{padding:"12px 14px",textAlign:"center",background:isW?"#051a07":isL?"#150608":"#110d22",opacity:isL?0.4:1,borderRight:fi<fighters.length-1?"1px solid #1a1a1a":"none"}}>
+                              <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,color:isW?col.primary:"#fff"}}>{p.name}</div>
+                              <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa"}}>{p.city}</div>
+                              {isW&&<div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:10,color:col.primary,marginTop:4}}>🏆 WINNER</div>}
+                            </div>
+                          );
+                        })}
+                        {!is3way&&<div style={{display:"flex",alignItems:"center",padding:"0 10px",fontFamily:"Bebas Neue,sans-serif",fontSize:14,color:"#2a1840"}}>VS</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button className="btn" style={{marginTop:22,alignSelf:"flex-start",background:"#1c1232",color:"#777",border:"1px solid #3d2080",fontSize:11}} onClick={()=>setOverlayActive(false)}>✕ CLOSE</button>
+          </div>
+        );
+      })()}
 
       {/* End event confirm */}
       {showConfirm&&(
@@ -3441,7 +3392,6 @@ function Dashboard({ event, memberName, onBack, showToast }) {
             {key:"roundsetup",label:"⚡ ROUND SETUP"},
             {key:"scores",label:"SCORES (VIEW)"},
             {key:"bracket",label:"BRACKET"},
-            {key:"leaderboard",label:"LEADERBOARD"},
             {key:"notifications",label:`🔔 ANNOUNCEMENTS${notifHistory.length>0?" ("+notifHistory.length+")":""}`},
             {key:"export",label:"EXPORT"},
           ].map(t=><button key={t.key} className="tbtn" style={{color:tab===t.key?col.primary:"#7755aa",borderBottom:tab===t.key?`3px solid ${col.primary}`:"3px solid transparent"}} onClick={()=>setTab(t.key)}>{t.label}</button>)}
@@ -3465,7 +3415,22 @@ function Dashboard({ event, memberName, onBack, showToast }) {
 
         {tab==="organizer"&&<OrganizerTab activeCat={activeCat} catSorted={catSorted} col={col} onAdd={addParticipant} getScore={getScore}/>}
         {tab==="attendees"&&<AttendeeTab event={event} col={col} showToast={showToast}/>}
-        {tab==="host"&&<HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast}/>}
+        {tab==="host"&&(
+          <>
+            {(()=>{
+              const koRounds=(eventRounds||[]).filter(r=>r!=="Prelims");
+              const finalsR=koRounds[koRounds.length-1];
+              const finalsOk=finalsR&&categories.some(cat=>{
+                const decs=battles.filter(b=>b.category===cat&&b.round===finalsR);
+                if(!decs.length)return false;
+                const mi=[...new Set(decs.map(d=>d.match_index))][0];
+                return resolveBattle(decs.filter(d=>d.match_index===mi)).status==="decided";
+              });
+              return finalsOk?<WinnerDashboard event={event} categories={categories} participants={participants} battles={battles} allRounds={eventRounds}/>:null;
+            })()}
+            <HostTab event={event} eventRounds={eventRounds} activeCat={activeCat} col={col} checkedIn={checkedIn} prelimRanked={prelimRanked} getScore={getScore} battles={battles.filter(b=>b.category===activeCat)} participantMap={participantMap} showToast={showToast}/>
+          </>
+        )}
         {tab==="roundsetup"&&<RoundSetupTab col={col} eventRounds={eventRounds} onSave={saveRounds} saving={roundsSaving} participants={participants} categories={categories}/>}
 
         {tab==="judges"&&(
@@ -3510,27 +3475,36 @@ function Dashboard({ event, memberName, onBack, showToast }) {
                 </div>
               ))}
             </div>
-            {/* Push not-checked-in to Emcee */}
+
+            {/* Last Call — sends notification to Emcee only */}
             {catParts.filter(p=>!p.checked_in&&!p.disqualified).length>0&&(
-              <div style={{background:"#0a1a00",border:"1px solid #7fff0033",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
-                <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:12,letterSpacing:2,color:"#7fff00",marginBottom:6}}>📣 LAST CALL — NOT YET CHECKED IN</div>
-                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc",marginBottom:8}}>
-                  Push these names to the Emcee for a final announcement before disqualification:
+              <div style={{background:"#0a1a00",border:"1px solid #7fff0033",borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontFamily:"Bebas Neue,sans-serif",fontSize:13,letterSpacing:2,color:"#7fff00"}}>📣 LAST CALL</span>
+                  <span style={{fontFamily:"Barlow,sans-serif",fontSize:9,padding:"2px 8px",borderRadius:10,background:"#ff980022",border:"1px solid #ff980044",color:"#ff9800"}}>→ EMCEE ONLY</span>
+                </div>
+                <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#9980cc",marginBottom:10}}>
+                  These participants haven't checked in yet. Push their names to the Emcee — the announcement will only appear on the Emcee screen.
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
                   {catParts.filter(p=>!p.checked_in&&!p.disqualified).map(p=>(
                     <span key={p.id} style={{fontFamily:"Bebas Neue,sans-serif",fontSize:11,padding:"4px 10px",background:"#120e22",border:"1px solid #ff4d4d44",borderRadius:20,color:"#ff4d4d"}}>{p.name}</span>
                   ))}
                 </div>
-                <button className="btn" style={{background:"#7fff00",color:"#000",fontSize:11,padding:"8px 18px"}}
+                <button className="btn" style={{background:"#7fff00",color:"#000",fontSize:11,padding:"9px 20px"}}
                   onClick={async()=>{
                     const names=catParts.filter(p=>!p.checked_in&&!p.disqualified).map(p=>p.name).join(", ");
-                    const msg=`🎤 LAST CALL — Please check in NOW or you will be disqualified: ${names}`;
-                    const{error}=await supabase.from("event_notifications").insert({event_id:event.id,message:msg,round:"Check-In"});
-                    if(error)showToast("Failed to push to Emcee","error");
-                    else showToast("📣 Last call pushed to Emcee screen ✓");
+                    const msg=`📣 LAST CALL [${activeCat}] — Please check in NOW or you will be disqualified: ${names}`;
+                    const{error}=await supabase.from("event_notifications").insert({
+                      event_id:event.id,
+                      message:msg,
+                      round:"Check-In",
+                      recipients:["emcee"],
+                    });
+                    if(error)showToast("Failed to send last call","error");
+                    else showToast("📣 Last call sent to Emcee screen only ✓");
                   }}>
-                  📣 PUSH LAST CALL TO EMCEE
+                  📣 SEND LAST CALL → EMCEE ONLY
                 </button>
               </div>
             )}
@@ -3568,17 +3542,20 @@ function Dashboard({ event, memberName, onBack, showToast }) {
         {tab==="scores"&&(
           <div className="slide">
             <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>SCORES (VIEW ONLY) · {activeCat}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:8}}>Prelim scores only — entered by judges. Read-only for organizers.</div>
+            <div style={{fontFamily:"Barlow,sans-serif",fontSize:12,color:"#7755aa",marginBottom:8}}>Prelim scores — entered by judges. Sorted high to low. Read-only for organizers.</div>
             <div style={{background:"#1a1a0a",border:"1px solid #ffd70022",borderRadius:8,padding:"8px 14px",marginBottom:18,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc"}}>
               ⚡ These scores are used only for seeding. They do not carry into knockout rounds.
             </div>
-            {checkedIn.map(p=>{
+            {prelimRanked.map((p,rank)=>{
               const sm=scoreMap[p.id]||{};
               return (
-                <div key={p.id} className="card" style={{marginBottom:10}}>
+                <div key={p.id} className="card" style={{marginBottom:10,border:rank<3?`1px solid ${col.border}`:"1px solid #1e1e1e"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
-                    <div><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:col.primary}}>{getScore(p.id)||"—"}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:rank<3?col.primary:"#3d2080",minWidth:36}}>#{rank+1}</div>
+                      <div><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:16}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
+                    </div>
+                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:28,color:rank<3?col.primary:"#fff"}}>{getScore(p.id)||"—"}</div>
                   </div>
                   <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                     {catJudges.map(j=>{const key=`${j.category}-J${j.slot}`;return <div key={key} style={{background:"#1c1232",border:"1px solid #3d2080",borderRadius:6,padding:"5px 9px",textAlign:"center",minWidth:64}}><div style={{fontFamily:"Barlow,sans-serif",fontSize:8,color:"#7755aa",marginBottom:1}}>{j.judge_name}</div><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:"#fff"}}>{sm[key]??"—"}</div></div>;})}
@@ -3591,59 +3568,6 @@ function Dashboard({ event, memberName, onBack, showToast }) {
         )}
 
         {tab==="bracket"&&<BracketTab event={event} activeCat={activeCat} col={col} prelimRanked={prelimRanked} participantMap={participantMap} showToast={showToast}/>}
-
-        {tab==="leaderboard"&&(
-          <div className="slide">
-            {/* Show winner results if finals are decided */}
-            {(()=>{
-              const koR=(eventRounds||[]).filter(r=>r!=="Prelims");
-              const finR=koR[koR.length-1];
-              if(finR){
-                const finDecs=battles.filter(b=>b.category===activeCat&&b.round===finR);
-                if(finDecs.length>0){
-                  const mi=[...new Set(finDecs.map(d=>d.match_index))][0];
-                  if(resolveBattle(finDecs.filter(d=>d.match_index===mi)).status==="decided"){
-                    return <WinnerDashboard event={event} categories={[activeCat]} participants={participants} battles={battles} allRounds={eventRounds}/>;
-                  }
-                }
-              }
-              return null;
-            })()}
-            <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,letterSpacing:3,color:col.primary,marginBottom:4}}>PRELIM RANKING · {activeCat}</div>
-            <div style={{fontFamily:"Barlow,sans-serif",fontSize:11,color:"#7755aa",marginBottom:4}}>Ranked by total scores from all judges. Sets seeds for knockout brackets.</div>
-            <div style={{background:"#1a1a0a",border:"1px solid #ffd70022",borderRadius:8,padding:"8px 14px",marginBottom:16,fontFamily:"Barlow,sans-serif",fontSize:11,color:"#9980cc"}}>
-              Total score = sum of all judge scores in this category. Top N advance to knockout.
-            </div>
-            {catSorted.length>=2&&(
-              <div style={{display:"flex",gap:10,marginBottom:22,flexWrap:"wrap"}}>
-                {[{p:catSorted[1],rank:2,pt:55},{p:catSorted[0],rank:1,pt:85},{p:catSorted[2],rank:3,pt:38}].map(({p,rank,pt})=>p&&(
-                  <div key={p.id} style={{flex:1,minWidth:120,background:rank===1?col.bg:"#0f0b1e",border:`1px solid ${rank===1?col.border:"#1c1232"}`,borderRadius:12,padding:"14px",paddingTop:pt+"px",textAlign:"center"}}>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:38,color:rank===1?col.primary:rank===2?"#c0a8e8":"#cd7f32",lineHeight:1}}>#{rank}</div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:17,marginBottom:2}}>{p.name}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa",marginBottom:6}}>{p.city}</div>
-                    <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginBottom:2}}>TOTAL</div>
-                    <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:36,color:rank===1?col.primary:"#fff"}}>{getScore(p.id)}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{background:"#0d0a1a",border:"1px solid #161616",borderRadius:12,overflow:"hidden"}}>
-              {catSorted.map((p,i)=>(
-                <div key={p.id} className="lrow">
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:20,color:i<3?col.primary:"#2a1840",minWidth:36}}>#{i+1}</div>
-                  <div style={{flex:1}}><div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:15}}>{p.name}</div><div style={{fontFamily:"Barlow,sans-serif",fontSize:10,color:"#7755aa"}}>{p.city}</div></div>
-                  <div style={{fontFamily:"Barlow,sans-serif",fontSize:9,color:"#7755aa",marginRight:6}}>TOTAL</div>
-                  <div style={{fontFamily:"Bebas Neue,sans-serif",fontSize:18,color:i<3?col.primary:"#fff",minWidth:32,textAlign:"right"}}>{getScore(p.id)||"—"}</div>
-                  <span className="badge" style={{background:p.checked_in?"#00c85322":"#ff4d4d22",color:p.checked_in?"#00c853":"#ff4d4d"}}>{p.checked_in?"✓":"⌛"}</span>
-                </div>
-              ))}
-              {catParts.length===0&&<div style={{padding:"40px",textAlign:"center",fontFamily:"Barlow,sans-serif",color:"#3d2080"}}>No participants yet</div>}
-            </div>
-          </div>
-        )}
-
-
-
 
         {tab==="notifications"&&(
           <div className="slide">
