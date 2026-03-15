@@ -2778,6 +2778,7 @@ function HostTab({ event, eventRounds, activeCat, col, checkedIn, prelimRanked, 
   const totalIn = checkedIn.length;
   const parsed  = parseInt(advanceN);
 
+  const maxAllowedBracket = totalIn;
   const validN       = !isNaN(parsed) && parsed >= 2 && parsed <= totalIn;
   const bracketTooLarge = false;
   const activeN      = confirmed && validN ? parsed : null;
